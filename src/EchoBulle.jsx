@@ -30,10 +30,27 @@ const palette = {
 };
 
 const worldPresets = {
-  flow: { sky: '#0a1d30', fog: 'color: #0a1d30; density: 0.022', fx: { color: '#8dd2ff', radius: 6, count: 28, drift: 0.018 } },
-  hollow: { sky: '#0c1018', fog: 'color: #0c1018; density: 0.028', fx: { color: '#c4ffc8', radius: 5.2, count: 22, drift: 0.012 } },
-  tide: { sky: '#0b1b21', fog: 'color: #0b1b21; density: 0.02', fx: { color: '#b6e8ff', radius: 7, count: 32, drift: 0.02 } },
+  flow: {
+    sky: '#0a1d30',
+    fog: 'color: #0a1d30; density: 0.022',
+    fx: { color: '#8dd2ff', radius: 6, count: 36, drift: 0.18 },
+  },
+  hollow: {
+    sky: '#0c1018',
+    fog: 'color: #0c1018; density: 0.028',
+    fx: { color: '#c4ffc8', radius: 5.4, count: 30, drift: 0.14 },
+  },
+  tide: {
+    sky: '#0b1b21',
+    fog: 'color: #0b1b21; density: 0.02',
+    fx: { color: '#b6e8ff', radius: 7.4, count: 42, drift: 0.2 },
+  },
 };
+
+const videoSources = [
+  { id: 'kobul-video-1', src: 'https://cdn.aframe.io/videos/360-video/Chamonix/Chamonix_1.mp4' },
+  { id: 'kobul-video-2', src: 'https://cdn.aframe.io/videos/bunny.mp4' },
+];
 
 function registerComponents() {
   if (!window.AFRAME || window.AFRAME.components['gentle-float']) return;
@@ -68,36 +85,93 @@ function registerComponents() {
     },
   });
 
-  window.AFRAME.registerComponent('pulse-field', {
-    schema: { count: { default: 24 }, radius: { default: 6 }, color: { default: '#8dd2ff' }, drift: { default: 0.016 } },
+  window.AFRAME.registerComponent('firefly-field', {
+    schema: {
+      count: { default: 36 },
+      radius: { default: 6 },
+      color: { default: '#8dd2ff' },
+      drift: { default: 0.18 },
+    },
     init() {
       this.nodes = [];
       for (let i = 0; i < this.data.count; i += 1) {
-        const node = document.createElement('a-sphere');
-        const r = Math.random() * this.data.radius;
+        const r = Math.random() * this.data.radius * 0.8 + this.data.radius * 0.2;
         const theta = Math.random() * Math.PI * 2;
         const phi = Math.random() * Math.PI;
         const x = r * Math.sin(phi) * Math.cos(theta);
         const y = r * Math.cos(phi);
         const z = r * Math.sin(phi) * Math.sin(theta);
-        node.setAttribute('radius', 0.08 + Math.random() * 0.06);
-        node.setAttribute('position', `${x} ${y} ${z}`);
+
+        const node = document.createElement('a-sphere');
+        node.setAttribute('radius', 0.06 + Math.random() * 0.05);
         node.setAttribute('color', this.data.color);
-        node.setAttribute('material', 'opacity: 0.3; transparent: true; roughness: 0.1; metalness: 0');
-        node.dataset.baseY = y;
+        node.setAttribute(
+          'material',
+          `opacity: 0.32; transparent: true; emissive: ${this.data.color}; emissiveIntensity: 0.28; roughness: 0.1; metalness: 0`
+        );
+        node.setAttribute('position', `${x} ${y} ${z}`);
+
+        this.nodes.push({
+          el: node,
+          pos: { x, y, z },
+          vel: {
+            x: (Math.random() - 0.5) * 0.03,
+            y: (Math.random() - 0.5) * 0.02,
+            z: (Math.random() - 0.5) * 0.03,
+          },
+          phase: Math.random() * Math.PI * 2,
+        });
+
         this.el.appendChild(node);
-        this.nodes.push(node);
       }
     },
-    tick(time) {
-      this.nodes.forEach((node, idx) => {
-        const amp = 0.4 + (idx % 5) * 0.04;
-        const speed = this.data.drift * 1000 + (idx % 7) * 3;
-        const baseY = parseFloat(node.dataset.baseY || '0');
-        const offset = Math.sin((time + idx * 30) / speed) * amp;
-        const pos = node.getAttribute('position');
-        node.setAttribute('position', `${pos.x} ${baseY + offset} ${pos.z}`);
+    tick(time, dt) {
+      const delta = Math.min(dt || 16, 40) / 1000;
+      const maxSpeed = 0.18;
+      this.nodes.forEach((node) => {
+        const ax = (Math.random() - 0.5) * this.data.drift * 0.008;
+        const ay = (Math.random() - 0.5) * this.data.drift * 0.006;
+        const az = (Math.random() - 0.5) * this.data.drift * 0.008;
+
+        node.vel.x = (node.vel.x + ax) * 0.96;
+        node.vel.y = (node.vel.y + ay) * 0.96;
+        node.vel.z = (node.vel.z + az) * 0.96;
+
+        const speed = Math.hypot(node.vel.x, node.vel.y, node.vel.z);
+        if (speed > maxSpeed) {
+          const scale = maxSpeed / speed;
+          node.vel.x *= scale;
+          node.vel.y *= scale;
+          node.vel.z *= scale;
+        }
+
+        node.pos.x += node.vel.x * delta;
+        node.pos.y += node.vel.y * delta;
+        node.pos.z += node.vel.z * delta;
+
+        const dist = Math.hypot(node.pos.x, node.pos.y, node.pos.z);
+        if (dist > this.data.radius) {
+          const pull = this.data.radius / dist;
+          node.pos.x *= pull;
+          node.pos.y *= pull;
+          node.pos.z *= pull;
+          node.vel.x *= -0.4;
+          node.vel.y *= -0.4;
+          node.vel.z *= -0.4;
+        }
+
+        const glow = 0.9 + Math.sin(time / 1100 + node.phase) * 0.12;
+        node.el.object3D.scale.set(glow, glow, glow);
+        node.el.setAttribute('position', `${node.pos.x} ${node.pos.y} ${node.pos.z}`);
       });
+    },
+  });
+
+  window.AFRAME.registerComponent('slow-spin', {
+    schema: { speed: { default: 0.02 } },
+    tick(time, dt) {
+      const rot = this.el.object3D.rotation;
+      rot.y += (this.data.speed * dt) / 1000;
     },
   });
 
@@ -253,6 +327,22 @@ export default function EchoBulle() {
     scene.setAttribute('vr-mode-ui', 'enabled: true');
     scene.setAttribute('webxr', 'optionalFeatures: local-floor, bounded-floor, hand-tracking, dom-overlay; overlayElement: #aframe-shell');
 
+    const assets = document.createElement('a-assets');
+    videoSources.forEach((video) => {
+      const videoEl = document.createElement('video');
+      videoEl.setAttribute('id', video.id);
+      videoEl.setAttribute('src', video.src);
+      videoEl.setAttribute('autoplay', 'true');
+      videoEl.setAttribute('loop', 'true');
+      videoEl.setAttribute('muted', 'true');
+      videoEl.setAttribute('playsinline', 'true');
+      videoEl.setAttribute('preload', 'auto');
+      videoEl.setAttribute('crossorigin', 'anonymous');
+      videoEl.autoplay = true;
+      assets.appendChild(videoEl);
+    });
+    scene.appendChild(assets);
+
     const cameraRig = document.createElement('a-entity');
     cameraRig.id = 'cameraRig';
     cameraRig.setAttribute('position', '0 1.6 4.2');
@@ -333,11 +423,32 @@ export default function EchoBulle() {
       fogShell.setAttribute('material', `color: ${config.sky}; side: back; opacity: 0.35; transparent: true`);
 
       const fx = document.createElement('a-entity');
-      fx.setAttribute('pulse-field', `count: ${config.fx.count}; radius: ${config.fx.radius}; color: ${config.fx.color}; drift: ${config.fx.drift}`);
+      fx.setAttribute('firefly-field', `count: ${config.fx.count}; radius: ${config.fx.radius}; color: ${config.fx.color}; drift: ${config.fx.drift}`);
+
+      const videoGroup = document.createElement('a-entity');
+      const cubePositions = [
+        { x: -1.4, y: 1.2, z: -2.6 },
+        { x: 1.3, y: 1.6, z: -2.4 },
+        { x: 0, y: 0.9, z: -3.1 },
+      ];
+
+      cubePositions.forEach((pos, idx) => {
+        const cube = document.createElement('a-box');
+        cube.setAttribute('depth', '0.9');
+        cube.setAttribute('height', '0.9');
+        cube.setAttribute('width', '0.9');
+        cube.setAttribute('position', `${pos.x} ${pos.y} ${pos.z}`);
+        cube.setAttribute('rotation', `${-6 + idx * 3} ${idx * 20} ${4 - idx * 2}`);
+        cube.setAttribute('material', `src: #${videoSources[idx % videoSources.length].id}; roughness: 0.4; metalness: 0.08; opacity: 0.95`);
+        cube.setAttribute('gentle-float', 'amp: 0.06; speed: 0.22');
+        cube.setAttribute('slow-spin', `speed: ${0.2 + idx * 0.05}`);
+        videoGroup.appendChild(cube);
+      });
 
       world.appendChild(sky);
       world.appendChild(fogShell);
       world.appendChild(fx);
+      world.appendChild(videoGroup);
       worldContainer.appendChild(world);
     });
 
