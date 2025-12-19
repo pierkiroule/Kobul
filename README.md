@@ -18,7 +18,7 @@ EchoBulle est une exploration immersive légère : un réseau de bulles métapho
 
 ### Mode B — Navigation fractale (explicite)
 - **Entrer** : maintenir le tap/trigger ou laisser le regard sur une bulle ~1 seconde. La scène se recentre sur la bulle, seules la bulle, son parent, ses enfants et ses liens directs restent visibles.
-- **Sortir** : tap/clic sur le fond (ciel) ou regard long sur le vide pour revenir au niveau supérieur.
+- **Sortir** : tap/clic sur le fond (ciel) ou regard long/fuse sur le fond pour revenir au niveau supérieur.
 
 ## Données et structure
 - Les bulles sont décrites dans `js/data.js` avec : `id`, `title`, `level`, `position`, `parent`, `children`, `links`.

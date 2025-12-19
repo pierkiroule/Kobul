@@ -71,13 +71,13 @@
     if (state.selectedId && state.entities.has(state.selectedId)) {
       const prev = state.entities.get(state.selectedId);
       prev.setAttribute("scale", "1 1 1");
-      prev.setAttribute("material", "color: " + levelColor(bubbleById[state.selectedId].level));
+      prev.setAttribute("color", levelColor(bubbleById[state.selectedId].level));
     }
     state.selectedId = id;
     const entity = state.entities.get(id);
     if (entity) {
       entity.setAttribute("scale", "1.15 1.15 1.15");
-      entity.setAttribute("material", "color: #ffe89e");
+      entity.setAttribute("color", "#ffe89e");
     }
   }
 
@@ -155,11 +155,13 @@
   }
 
   function attachSkyExit() {
-    sky.addEventListener("click", () => {
+    const exit = () => {
       if (state.focusId) {
         clearFocus();
       }
-    });
+    };
+    sky.addEventListener("click", exit);
+    sky.addEventListener("fusing", exit);
   }
 
   window.EchoApp = {

@@ -42,7 +42,7 @@ AFRAME.registerComponent("bubble-interactions", {
 
     this.el.addEventListener("click", this.onClick);
 
-    ["mousedown", "touchstart", "triggerdown", "mouseenter"].forEach((ev) => {
+    ["mousedown", "touchstart", "triggerdown", "fusing"].forEach((ev) => {
       this.el.addEventListener(ev, this.startHold);
     });
     ["mouseup", "touchend", "triggerup", "mouseleave"].forEach((ev) => {
@@ -51,6 +51,12 @@ AFRAME.registerComponent("bubble-interactions", {
   },
   remove() {
     this.el.removeEventListener("click", this.onClick);
+    ["mousedown", "touchstart", "triggerdown", "fusing"].forEach((ev) => {
+      this.el.removeEventListener(ev, this.startHold);
+    });
+    ["mouseup", "touchend", "triggerup", "mouseleave"].forEach((ev) => {
+      this.el.removeEventListener(ev, this.cancelHold);
+    });
   },
   startHold() {
     if (this.holdTimer) return;
