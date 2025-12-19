@@ -211,6 +211,32 @@ body {
   accent-color: #7fceff;
 }
 
+.bubble-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  min-width: 220px;
+}
+
+.pill--primary {
+  background: rgba(127, 206, 255, 0.28);
+  border-color: rgba(127, 206, 255, 0.95);
+  box-shadow: 0 14px 28px rgba(0, 0, 0, 0.24), 0 0 0 1px rgba(127, 206, 255, 0.12);
+}
+
+.scene-legend {
+  padding: 12px 14px 14px;
+  max-width: 280px;
+  color: rgba(233, 242, 255, 0.85);
+  line-height: 1.5;
+}
+
+.legend-line {
+  margin: 4px 0;
+  font-size: 12px;
+  color: rgba(233, 242, 255, 0.7);
+}
+
 .nav-hint {
   margin: 0;
   font-size: 11px;
