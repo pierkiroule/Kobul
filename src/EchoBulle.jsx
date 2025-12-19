@@ -231,6 +231,8 @@ export default function EchoBulle() {
   const [xrSupported, setXrSupported] = useState(false);
   const hoverRef = useRef(null);
   const actionsRef = useRef({ enter: null, exit: null });
+  const [menuPos, setMenuPos] = useState({ x: 18, y: 18 });
+  const dragRef = useRef(null);
 
   useEffect(() => {
     if (!ready) return;
@@ -449,6 +451,37 @@ export default function EchoBulle() {
   const selectedBubble = bubbles.find((b) => b.id === selected);
   const worldPreset = selected ? worldPresets[selected] : null;
 
+  const handleMenuDragMove = (e) => {
+    if (!dragRef.current) return;
+    setMenuPos({
+      x: Math.max(8, e.clientX - dragRef.current.offsetX),
+      y: Math.max(8, e.clientY - dragRef.current.offsetY),
+    });
+  };
+
+  const handleMenuDragEnd = () => {
+    dragRef.current = null;
+    window.removeEventListener('pointermove', handleMenuDragMove);
+    window.removeEventListener('pointerup', handleMenuDragEnd);
+  };
+
+  const handleMenuDragStart = (e) => {
+    e.preventDefault();
+    dragRef.current = {
+      offsetX: e.clientX - menuPos.x,
+      offsetY: e.clientY - menuPos.y,
+    };
+    window.addEventListener('pointermove', handleMenuDragMove);
+    window.addEventListener('pointerup', handleMenuDragEnd);
+  };
+
+  useEffect(() => {
+    return () => {
+      window.removeEventListener('pointermove', handleMenuDragMove);
+      window.removeEventListener('pointerup', handleMenuDragEnd);
+    };
+  }, []);
+
   if (!ready) {
     return <div style={{ padding: '24px', color: 'rgba(227,241,255,0.7)' }}>Chargement de l’espace…</div>;
   }
@@ -461,74 +494,46 @@ export default function EchoBulle() {
       <div ref={mountRef} className="scene-mount" />
 
       <div className="ui-layer">
-        <div className="info-panel glass">
-          <div className="eyebrow">Mode</div>
-          <div className="headline">{mode === 'sculpture' ? 'Sculpture manipulable' : 'Monde immersif'}</div>
-          <p className="micro">{mode === 'sculpture'
-            ? 'Fais pivoter la sculpture, zoom doux, sélectionne un portail.'
-            : 'World chargé : respire, contemple, sors quand tu veux.'}
-          </p>
-        </div>
-
-        <div className="selection-panel glass">
-          <div className="eyebrow">Bulle active</div>
-          <div className="selection-title">{selectedBubble?.title || 'Choisis un portail'}</div>
-          <div className="badge-row">
-            <span className="chip">ID · {selected || '—'}</span>
-            <span className="chip ghost">Niveau {selectedBubble?.level ?? '—'}</span>
-            {mode === 'monde' && <span className="chip pulse">Immersion en cours</span>}
+        <div
+          className="floating-menu"
+          style={{ left: `${menuPos.x}px`, top: `${menuPos.y}px` }}
+        >
+          <div
+            className="menu-handle"
+            role="presentation"
+            onPointerDown={handleMenuDragStart}
+          >
+            ▤
           </div>
-
-          {worldPreset && (
-            <div className="world-preview">
-              <div className="world-grad" style={{ background: `radial-gradient(circle at 30% 30%, ${worldPreset.fx.color}, ${worldPreset.sky})` }} />
-              <div>
-                <div className="eyebrow">World palette</div>
-                <div className="micro">Ciel {worldPreset.sky} · Halo {worldPreset.fx.color}</div>
-              </div>
+          <div className="menu-section">
+            <div className="menu-label">{mode === 'sculpture' ? 'Sculpture' : 'Monde'}</div>
+            <div className="menu-title">{selectedBubble?.title || 'Choisis une bulle'}</div>
+            <div className="menu-caption">
+              {mode === 'sculpture'
+                ? 'Glisse pour orienter, pince pour zoomer. Tap/trigger pour sélectionner.'
+                : 'Immersion ouverte. Le réseau reste intact, sortie immédiate.'}
             </div>
-          )}
-
-          <div className="cta-row">
-            <button
-              type="button"
-              className={`cta ${canEnter ? '' : 'disabled'}`}
-              onClick={enterSelected}
-              disabled={!canEnter}
-            >
-              Entrer dans le monde
-            </button>
-            <button
-              type="button"
-              className={`cta ghost ${canExit ? '' : 'disabled'}`}
-              onClick={exitWorld}
-              disabled={!canExit}
-            >
-              Sortir / Revenir
-            </button>
           </div>
+
+          <div className="menu-actions">
+            <button type="button" className={`pill ${canEnter ? '' : 'disabled'}`} onClick={enterSelected} disabled={!canEnter}>
+              Entrer
+            </button>
+            <button type="button" className={`pill ghost ${canExit ? '' : 'disabled'}`} onClick={exitWorld} disabled={!canExit}>
+              Sortir
+            </button>
+            {xrSupported && (
+              <button type="button" className="pill ghost" onClick={() => sceneRef.current?.enterVR?.()}>
+                VR
+              </button>
+            )}
+          </div>
+          <div className="menu-hint">Déplace le menu librement. Le réseau reste plein écran.</div>
         </div>
 
-        <div className="hint-stack">
-          <div className="hint-card">
-            <div className="eyebrow">Mobile</div>
-            <div>1 doigt : rotation / glisser · 2 doigts : zoom.</div>
-            <div>Tap = sélection · Bouton = entrer / sortir.</div>
-          </div>
-          <div className="hint-card">
-            <div className="eyebrow">VR</div>
-            <div>Grip : saisir la sculpture · Trigger : sélectionner.</div>
-            <div>Bouton A / X : entrer ou sortir du monde.</div>
-          </div>
-        </div>
-
-        <div className="vr-dock">
-          <div className="chip ghost">{xrSupported ? 'VR prête' : 'VR disponible sur casque compatible'}</div>
-          {xrSupported && (
-            <button className="cta mini" type="button" onClick={() => sceneRef.current?.enterVR?.()}>
-              Mode VR
-            </button>
-          )}
+        <div className="minimal-hints">
+          <span className="hint-pill">Mobile : drag/zoom · Tap pour sélectionner</span>
+          <span className="hint-pill">VR : grip pour saisir · Trigger pour viser</span>
         </div>
       </div>
     </div>
