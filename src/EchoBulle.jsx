@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { bubbles, relatedIds } from './data.js';
 import { startAmbient } from './audio.js';
 
@@ -120,9 +120,9 @@ const palette = {
 
 export default function EchoBulle() {
   const ready = useAframe();
-  const sceneRef = useRef(null);
-  const [focusId, setFocusId] = useState(null);
-  const [hoverId, setHoverId] = useState(null);
+  const mountRef = useRef(null);
+  const focusRef = useRef(null);
+  const hoverRef = useRef(null);
 
   useEffect(() => {
     if (!ready) return;
@@ -130,130 +130,171 @@ export default function EchoBulle() {
   }, [ready]);
 
   useEffect(() => {
-    if (!ready || !sceneRef.current) return;
-    const scene = sceneRef.current;
-    const onSelect = (e) => setFocusId(e.detail.id);
-    const onHover = (e) => setHoverId(e.detail.id);
-    const onBackdrop = () => setFocusId(null);
+    if (!ready || !mountRef.current) return;
 
-    scene.addEventListener('bubble-select', onSelect);
-    scene.addEventListener('bubble-hover', onHover);
-    scene.addEventListener('backdrop-release', onBackdrop);
+    const bubbleRefs = new Map();
+    const linkRefs = [];
+
+    const scene = document.createElement('a-scene');
+    scene.setAttribute('background', `color: ${palette.haze}`);
+    scene.setAttribute('renderer', 'colorManagement: true; foveationLevel: 2');
+    scene.setAttribute('vr-mode-ui', 'enabled: true');
+
+    const haze = document.createElement('a-entity');
+    haze.id = 'haze';
+    haze.className = 'backdrop';
+    haze.setAttribute('geometry', 'primitive: sphere; radius: 32');
+    haze.setAttribute('material', `color: ${palette.haze}; side: back; opacity: 0.42`);
+    haze.setAttribute('backdrop-exit', '');
+    const hazeAnim = document.createElement('a-animation');
+    hazeAnim.setAttribute('attribute', 'material.opacity');
+    hazeAnim.setAttribute('from', '0.36');
+    hazeAnim.setAttribute('to', '0.48');
+    hazeAnim.setAttribute('direction', 'alternate');
+    hazeAnim.setAttribute('dur', '7200');
+    hazeAnim.setAttribute('repeat', 'indefinite');
+    hazeAnim.setAttribute('easing', 'easeInOutSine');
+    haze.appendChild(hazeAnim);
+    scene.appendChild(haze);
+
+    const cameraRig = document.createElement('a-entity');
+    cameraRig.id = 'cameraRig';
+    cameraRig.setAttribute('position', '0 1.6 4.4');
+    const camera = document.createElement('a-entity');
+    camera.id = 'camera';
+    camera.setAttribute('camera', 'active: true');
+    camera.setAttribute('look-controls', 'pointerLockEnabled: false');
+    camera.setAttribute('wasd-controls', 'acceleration: 8');
+    const cursor = document.createElement('a-entity');
+    cursor.setAttribute('cursor', 'fuse: true; fuseTimeout: 1200');
+    cursor.setAttribute('raycaster', 'objects: .selectable, .backdrop');
+    cursor.setAttribute('position', '0 0 -0.9');
+    cursor.setAttribute('geometry', 'primitive: ring; radiusInner: 0.01; radiusOuter: 0.016');
+    cursor.setAttribute('material', `color: ${palette.glow}; opacity: 0.45`);
+    cursor.setAttribute('soft-pulse', 'base: 1; boost: 0.06');
+    camera.appendChild(cursor);
+    cameraRig.appendChild(camera);
+    scene.appendChild(cameraRig);
+
+    const cluster = document.createElement('a-entity');
+    cluster.setAttribute('position', '0 0 -3');
+
+    links.forEach(({ a, b }) => {
+      const from = bubbles.find((n) => n.id === a);
+      const to = bubbles.find((n) => n.id === b);
+      if (!from || !to) return;
+      const link = document.createElement('a-entity');
+      link.dataset.link = `${a}::${b}`;
+      link.setAttribute('line', `start: ${from.position.x} ${from.position.y} ${from.position.z}; end: ${to.position.x} ${to.position.y} ${to.position.z}; color: ${palette.link}`);
+      link.setAttribute('material', 'opacity: 0.32');
+      linkRefs.push(link);
+      cluster.appendChild(link);
+    });
+
+    bubbles.forEach((bubble) => {
+      const { id, title, level, position } = bubble;
+      const wrapper = document.createElement('a-entity');
+      wrapper.setAttribute('position', `${position.x} ${position.y} ${position.z}`);
+      wrapper.setAttribute('gentle-float', `amp: ${0.05 + level * 0.015}; speed: ${0.25 + level * 0.06}`);
+
+      const sphere = document.createElement('a-sphere');
+      sphere.className = 'selectable';
+      sphere.setAttribute('radius', '0.32');
+      sphere.setAttribute('color', palette.calm);
+      sphere.setAttribute('soft-select', `id: ${id}`);
+      sphere.setAttribute('soft-pulse', 'base: 1; boost: 0.04');
+      sphere.setAttribute('material', `roughness: 0.3; metalness: 0.02; opacity: 0.75; transparent: true; emissive: ${palette.glow}; emissiveIntensity: 0.18`);
+      const sphereAnim = document.createElement('a-animation');
+      sphereAnim.setAttribute('attribute', 'material.opacity');
+      sphereAnim.setAttribute('direction', 'alternate');
+      sphereAnim.setAttribute('dur', '2600');
+      sphereAnim.setAttribute('repeat', 'indefinite');
+      sphereAnim.setAttribute('easing', 'easeInOutSine');
+      sphereAnim.setAttribute('begin', 'mouseenter');
+      sphereAnim.setAttribute('end', 'mouseleave');
+      sphere.appendChild(sphereAnim);
+
+      const label = document.createElement('a-entity');
+      label.setAttribute('position', '0 -0.52 0');
+      label.setAttribute('face-camera', '');
+      label.setAttribute('text', `value: ${title}\nNiveau ${level}; align: center; color: ${palette.glow}; opacity: 0.9; width: 2`);
+
+      wrapper.appendChild(sphere);
+      wrapper.appendChild(label);
+      cluster.appendChild(wrapper);
+
+      bubbleRefs.set(id, { wrapper, sphere, label, level, title });
+    });
+
+    const applyState = () => {
+      const focusId = focusRef.current;
+      const hoverId = hoverRef.current;
+      const visibleSet = focusId ? relatedIds(focusId) : null;
+
+      linkRefs.forEach((link) => {
+        const [a, b] = link.dataset.link.split('::');
+        const inFocus = !visibleSet || (visibleSet.has(a) && visibleSet.has(b));
+        const opacity = inFocus ? 0.32 : 0.08;
+        link.setAttribute('material', `color: ${palette.link}; opacity: ${opacity}`);
+      });
+
+      bubbleRefs.forEach(({ sphere, label, level, title }, id) => {
+        const isFocus = focusId === id;
+        const isHover = hoverId === id;
+        const isActive = !visibleSet || visibleSet.has(id);
+        const opacity = isActive ? (isFocus ? 0.95 : 0.75) : 0.22;
+        const scale = isFocus ? 1.15 : isHover ? 1.08 : 1;
+
+        sphere.setAttribute(
+          'material',
+          `roughness: 0.3; metalness: 0.02; opacity: ${opacity}; transparent: true; emissive: ${palette.glow}; emissiveIntensity: ${isFocus ? 0.35 : 0.18}`,
+        );
+        sphere.setAttribute('soft-pulse', `base: ${scale}; boost: 0.04`);
+        sphere.querySelector('a-animation')?.setAttribute('to', opacity);
+
+        label.setAttribute(
+          'text',
+          `value: ${title}\nNiveau ${level}; align: center; color: ${palette.glow}; opacity: ${isActive ? 0.9 : 0.35}; width: 2`,
+        );
+      });
+    };
+
+    const handleSelect = (e) => {
+      focusRef.current = e.detail.id;
+      applyState();
+    };
+
+    const handleHover = (e) => {
+      hoverRef.current = e.detail.id;
+      applyState();
+    };
+
+    const handleBackdrop = () => {
+      focusRef.current = null;
+      hoverRef.current = null;
+      applyState();
+    };
+
+    scene.addEventListener('bubble-select', handleSelect);
+    scene.addEventListener('bubble-hover', handleHover);
+    scene.addEventListener('backdrop-release', handleBackdrop);
+
+    cluster.addEventListener('loaded', applyState, { once: true });
+    scene.appendChild(cluster);
+    mountRef.current.appendChild(scene);
 
     return () => {
-      scene.removeEventListener('bubble-select', onSelect);
-      scene.removeEventListener('bubble-hover', onHover);
-      scene.removeEventListener('backdrop-release', onBackdrop);
+      scene.removeEventListener('bubble-select', handleSelect);
+      scene.removeEventListener('bubble-hover', handleHover);
+      scene.removeEventListener('backdrop-release', handleBackdrop);
+      cluster.removeEventListener('loaded', applyState);
+      mountRef.current?.removeChild(scene);
     };
   }, [ready]);
-
-  const visibleSet = useMemo(() => (focusId ? relatedIds(focusId) : null), [focusId]);
 
   if (!ready) {
     return <div style={{ padding: '24px', color: 'rgba(227,241,255,0.7)' }}>Chargement de l’espace…</div>;
   }
 
-  return (
-    <a-scene
-      ref={sceneRef}
-      background={`color: ${palette.haze}`}
-      renderer="colorManagement: true; foveationLevel: 2"
-      vr-mode-ui="enabled: true"
-    >
-      <a-entity id="haze" className="backdrop" geometry="primitive: sphere; radius: 32" material={`color: ${palette.haze}; side: back; opacity: 0.42`} backdrop-exit>
-        <a-animation
-          attribute="material.opacity"
-          from="0.36"
-          to="0.48"
-          direction="alternate"
-          dur="7200"
-          repeat="indefinite"
-          easing="easeInOutSine"
-        />
-      </a-entity>
-
-      <a-entity
-        id="cameraRig"
-        position="0 1.6 4.4"
-      >
-        <a-entity
-          id="camera"
-          camera="active: true"
-          look-controls="pointerLockEnabled: false"
-          wasd-controls="acceleration: 8"
-        >
-          <a-entity
-            cursor="fuse: true; fuseTimeout: 1200"
-            raycaster="objects: .selectable, .backdrop"
-            position="0 0 -0.9"
-            geometry="primitive: ring; radiusInner: 0.01; radiusOuter: 0.016"
-            material={`color: ${palette.glow}; opacity: 0.45`}
-            soft-pulse="base: 1; boost: 0.06"
-          />
-        </a-entity>
-      </a-entity>
-
-      <a-entity position="0 0 -3">
-        {links.map(({ a, b }) => {
-          const from = bubbles.find((n) => n.id === a);
-          const to = bubbles.find((n) => n.id === b);
-          if (!from || !to) return null;
-          const inFocus = !visibleSet || (visibleSet.has(a) && visibleSet.has(b));
-          const opacity = inFocus ? 0.32 : 0.08;
-          return (
-            <a-entity
-              key={`${a}-${b}`}
-              line={`start: ${from.position.x} ${from.position.y} ${from.position.z}; end: ${to.position.x} ${to.position.y} ${to.position.z}; color: ${palette.link}`}
-              material={`opacity: ${opacity}`}
-            />
-          );
-        })}
-
-        {bubbles.map((bubble) => {
-          const { id, title, level, position } = bubble;
-          const isFocus = focusId === id;
-          const isActive = !visibleSet || visibleSet.has(id);
-          const isHover = hoverId === id;
-          const opacity = isActive ? (isFocus ? 0.95 : 0.75) : 0.22;
-          const scale = isFocus ? 1.15 : isHover ? 1.08 : 1;
-          const amp = 0.05 + level * 0.015;
-          const speed = 0.25 + level * 0.06;
-
-          return (
-            <a-entity
-              key={id}
-              position={`${position.x} ${position.y} ${position.z}`}
-              gentle-float={`amp: ${amp}; speed: ${speed}`}
-            >
-              <a-sphere
-                className="selectable"
-                soft-select={`id: ${id}`}
-                soft-pulse={`base: ${scale}; boost: 0.04`}
-                radius="0.32"
-                color={palette.calm}
-                material={`roughness: 0.3; metalness: 0.02; opacity: ${opacity}; transparent: true; emissive: ${palette.glow}; emissiveIntensity: ${isFocus ? 0.35 : 0.18}`}
-              >
-                <a-animation
-                  attribute="material.opacity"
-                  to={opacity}
-                  direction="alternate"
-                  dur="2600"
-                  repeat="indefinite"
-                  easing="easeInOutSine"
-                  begin="mouseenter"
-                  end="mouseleave"
-                />
-              </a-sphere>
-
-              <a-entity
-                position="0 -0.52 0"
-                face-camera
-                text={`value: ${title}\nNiveau ${level}; align: center; color: ${palette.glow}; opacity: ${isActive ? 0.9 : 0.35}; width: 2`}
-              />
-            </a-entity>
-          );
-        })}
-      </a-entity>
-    </a-scene>
-  );
+  return <div ref={mountRef} style={{ width: '100%', height: '100%' }} />;
 }
