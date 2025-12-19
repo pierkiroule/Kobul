@@ -183,14 +183,20 @@ function registerComponents() {
       const scene = el.sceneEl;
 
       const select = () => scene?.emit('bubble-selected', { id });
+      const down = (e) => scene?.emit('bubble-pointer', { id, type: 'down', pointerId: e.pointerId });
+      const up = (e) => scene?.emit('bubble-pointer', { id, type: 'up', pointerId: e.pointerId });
 
       el.classList.add('selectable');
       el.addEventListener('click', select);
+      el.addEventListener('pointerdown', down);
+      el.addEventListener('pointerup', up);
       el.addEventListener('mouseenter', () => scene?.emit('bubble-hover', { id }));
       el.addEventListener('mouseleave', () => scene?.emit('bubble-hover', { id: null }));
 
       this.cleanup = () => {
         el.removeEventListener('click', select);
+        el.removeEventListener('pointerdown', down);
+        el.removeEventListener('pointerup', up);
       };
     },
     remove() {
@@ -199,6 +205,7 @@ function registerComponents() {
   });
 
   window.AFRAME.registerComponent('sculpture-controls', {
+    schema: { enabled: { default: true } },
     init() {
       this.canvas = null;
       this.touches = new Map();
@@ -206,11 +213,13 @@ function registerComponents() {
       this.startScale = 1;
       this.activePointers = new Set();
       this.baseDist = null;
+      this.bubblePointers = new Set();
 
       this.onPointerDown = this.onPointerDown.bind(this);
       this.onPointerUp = this.onPointerUp.bind(this);
       this.onPointerMove = this.onPointerMove.bind(this);
       this.onWheel = this.onWheel.bind(this);
+      this.handleBubblePointer = this.handleBubblePointer.bind(this);
 
       const scene = this.el.sceneEl;
       const bindCanvas = () => {
@@ -224,15 +233,33 @@ function registerComponents() {
 
       this.el.addEventListener('loaded', bindCanvas);
       bindCanvas();
+      scene?.addEventListener('bubble-pointer', this.handleBubblePointer);
+    },
+    update(oldData) {
+      if (oldData?.enabled !== this.data.enabled) {
+        this.activePointers.clear();
+        this.touches.clear();
+        this.baseDist = null;
+      }
     },
     remove() {
-      if (!this.canvas) return;
-      this.canvas.removeEventListener('pointerdown', this.onPointerDown);
+      if (this.canvas) {
+        this.canvas.removeEventListener('pointerdown', this.onPointerDown);
+        this.canvas.removeEventListener('wheel', this.onWheel);
+      }
       window.removeEventListener('pointerup', this.onPointerUp);
       window.removeEventListener('pointermove', this.onPointerMove);
-      this.canvas.removeEventListener('wheel', this.onWheel);
+      this.el.sceneEl?.removeEventListener('bubble-pointer', this.handleBubblePointer);
+    },
+    handleBubblePointer(e) {
+      const { pointerId, type } = e.detail || {};
+      if (!pointerId) return;
+      if (type === 'down') this.bubblePointers.add(pointerId);
+      if (type === 'up') this.bubblePointers.delete(pointerId);
     },
     onPointerDown(e) {
+      if (!this.data.enabled) return;
+      if (this.bubblePointers.has(e.pointerId)) return;
       this.activePointers.add(e.pointerId);
       this.touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
       this.startRot = { ...this.el.object3D.rotation };
@@ -244,16 +271,19 @@ function registerComponents() {
     onPointerUp(e) {
       this.activePointers.delete(e.pointerId);
       this.touches.delete(e.pointerId);
+      this.bubblePointers.delete(e.pointerId);
       if (this.touches.size < 2) {
         this.baseDist = null;
       }
     },
     onWheel(e) {
+      if (!this.data.enabled) return;
       const scale = this.el.object3D.scale.x;
       const next = Math.min(1.6, Math.max(0.55, scale + (e.deltaY > 0 ? -0.05 : 0.05)));
       this.el.object3D.scale.set(next, next, next);
     },
     onPointerMove(e) {
+      if (!this.data.enabled) return;
       if (!this.activePointers.has(e.pointerId)) return;
       this.touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
       const points = Array.from(this.touches.values());
@@ -300,15 +330,38 @@ export default function EchoBulle() {
   const sculptureRef = useRef(null);
   const worldContainerRef = useRef(null);
   const bubbleRefs = useRef(new Map());
-  const [mode, setMode] = useState('sculpture');
-  const [viewMode, setViewMode] = useState('3d');
+  const [spaceMode, setSpaceMode] = useState('reseau');
+  const [viewMode, setViewMode] = useState('2d');
   const [selected, setSelected] = useState(null);
   const [xrSupported, setXrSupported] = useState(false);
   const hoverRef = useRef(null);
-  const actionsRef = useRef({ enter: null, exit: null });
-  const [menuPos, setMenuPos] = useState({ x: 18, y: 18 });
-  const dragRef = useRef(null);
-  const [menuCollapsed, setMenuCollapsed] = useState(false);
+  const actionsRef = useRef({ enter: null, exit: null, select: null });
+  const inputLockedRef = useRef(false);
+
+  const [mapNodes, setMapNodes] = useState(() => {
+    const xs = bubbles.map((b) => b.position.x);
+    const zs = bubbles.map((b) => b.position.z);
+    const minX = Math.min(...xs);
+    const maxX = Math.max(...xs);
+    const minZ = Math.min(...zs);
+    const maxZ = Math.max(...zs);
+    const spanX = maxX - minX || 1;
+    const spanZ = maxZ - minZ || 1;
+    return bubbles.map((b) => ({
+      id: b.id,
+      title: b.title,
+      level: b.level,
+      x: ((b.position.x - minX) / spanX) * 100,
+      y: ((b.position.z - minZ) / spanZ) * 100,
+      links: b.links,
+    }));
+  });
+  const [mapScale, setMapScale] = useState(1);
+  const mapScaleRef = useRef(1);
+  const mapRef = useRef(null);
+  const mapTouchesRef = useRef(new Map());
+  const mapDragRef = useRef({ id: null, pointerId: null, moved: false });
+  const pinchRef = useRef({ base: null, start: 1 });
 
   useEffect(() => {
     if (!ready) return;
@@ -319,6 +372,21 @@ export default function EchoBulle() {
     if (!ready || !navigator?.xr?.isSessionSupported) return;
     navigator.xr.isSessionSupported('immersive-vr').then((supported) => setXrSupported(supported));
   }, [ready]);
+
+  useEffect(() => {
+    if (!sculptureRef.current) return;
+    const enabled = viewMode !== '2d' && spaceMode === 'reseau';
+    sculptureRef.current.setAttribute('sculpture-controls', `enabled: ${enabled}`);
+  }, [viewMode, spaceMode]);
+
+  useEffect(() => {
+    if (!sceneRef.current) return;
+    if (viewMode === 'vr') {
+      sceneRef.current.enterVR?.();
+    } else {
+      sceneRef.current.exitVR?.();
+    }
+  }, [viewMode]);
 
   useEffect(() => {
     if (!ready || !mountRef.current) return;
@@ -468,42 +536,52 @@ export default function EchoBulle() {
         const scale = isSelected ? 1.22 : isHover ? 1.1 : 1;
         sphere.setAttribute('material', `roughness: 0.32; metalness: 0.04; opacity: ${opacity}; transparent: true; emissive: ${palette.halo}; emissiveIntensity: ${emissive}`);
         sphere.setAttribute('soft-pulse', `base: ${scale}; boost: 0.05`);
-        label.setAttribute('visible', modeRef.current === 'sculpture');
+        label.setAttribute('visible', spaceModeRef.current === 'reseau');
       });
     };
 
     const selectedRef = { current: null };
-    const modeRef = { current: 'sculpture' };
+    const spaceModeRef = { current: 'reseau' };
 
     const selectBubble = (id) => {
+      if (inputLockedRef.current) return;
       selectedRef.current = id;
       setSelected(id);
       updateSculptureVisuals();
     };
 
-    const setModeValue = (nextMode) => {
-      modeRef.current = nextMode;
-      setMode(nextMode);
+    const setSpaceValue = (nextMode) => {
+      spaceModeRef.current = nextMode;
+      setSpaceMode(nextMode);
     };
 
     const showWorld = (id) => {
       const preset = worldPresets[id];
-      if (!preset) return;
+      if (!preset || inputLockedRef.current) return;
+      inputLockedRef.current = true;
+      setTimeout(() => {
+        inputLockedRef.current = false;
+      }, 420);
       sculpture.setAttribute('visible', false);
       worldContainer.setAttribute('visible', true);
       Array.from(worldContainer.children).forEach((child) => {
         child.setAttribute('visible', child.id === `world-${id}`);
       });
       scene.setAttribute('fog', preset.fog);
-      setModeValue('monde');
+      setSpaceValue('bulle');
       startAmbient();
     };
 
     const leaveWorld = () => {
+      if (inputLockedRef.current) return;
+      inputLockedRef.current = true;
+      setTimeout(() => {
+        inputLockedRef.current = false;
+      }, 320);
       worldContainer.setAttribute('visible', false);
       sculpture.setAttribute('visible', true);
       scene.removeAttribute('fog');
-      setModeValue('sculpture');
+      setSpaceValue('reseau');
       updateSculptureVisuals();
     };
 
@@ -520,11 +598,8 @@ export default function EchoBulle() {
     };
 
     const handleControllerEnter = () => {
-      if (modeRef.current === 'sculpture') {
-        showWorld(selectedRef.current);
-      } else {
-        leaveWorld();
-      }
+      if (spaceModeRef.current === 'reseau') showWorld(selectedRef.current);
+      else leaveWorld();
     };
 
     const handleEnterVr = () => setViewMode('vr');
@@ -561,19 +636,13 @@ export default function EchoBulle() {
   }, [ready]);
 
   const enterSelected = () => {
-    if (!selected || !worldPresets[selected]) return;
+    if (!selected || !worldPresets[selected] || inputLockedRef.current) return;
     actionsRef.current.enter?.();
   };
 
   const exitWorld = () => {
     actionsRef.current.exit?.();
   };
-
-  const selectFromUi = (id) => {
-    actionsRef.current.select?.(id);
-  };
-
-  const selectedBubble = bubbles.find((b) => b.id === selected);
 
   const switchTo2d = () => {
     setViewMode('2d');
@@ -590,82 +659,145 @@ export default function EchoBulle() {
     sceneRef.current?.enterVR?.();
   };
 
-  const twoDNodes = React.useMemo(() => {
-    const xs = bubbles.map((b) => b.position.x);
-    const zs = bubbles.map((b) => b.position.z);
-    const minX = Math.min(...xs);
-    const maxX = Math.max(...xs);
-    const minZ = Math.min(...zs);
-    const maxZ = Math.max(...zs);
-    const spanX = maxX - minX || 1;
-    const spanZ = maxZ - minZ || 1;
-    return bubbles.map((b) => ({
-      id: b.id,
-      title: b.title,
-      level: b.level,
-      x: ((b.position.x - minX) / spanX) * 100,
-      y: ((b.position.z - minZ) / spanZ) * 100,
-      links: b.links,
-    }));
-  }, []);
+  const clamp = (v, min, max) => Math.min(max, Math.max(min, v));
 
-  const handleMenuDragMove = (e) => {
-    if (!dragRef.current) return;
-    setMenuPos({
-      x: Math.max(8, e.clientX - dragRef.current.offsetX),
-      y: Math.max(8, e.clientY - dragRef.current.offsetY),
-    });
+  const updateMapScale = (next) => {
+    mapScaleRef.current = next;
+    setMapScale(next);
   };
 
-  const handleMenuDragEnd = () => {
-    dragRef.current = null;
-    window.removeEventListener('pointermove', handleMenuDragMove);
-    window.removeEventListener('pointerup', handleMenuDragEnd);
+  const svgCoords = (clientX, clientY) => {
+    const rect = mapRef.current?.getBoundingClientRect();
+    if (!rect) return null;
+    const x = ((clientX - rect.left) / rect.width / mapScaleRef.current) * 100;
+    const y = ((clientY - rect.top) / rect.height / mapScaleRef.current) * 100;
+    return { x: clamp(x, 2, 98), y: clamp(y, 2, 98) };
   };
 
-  const handleMenuDragStart = (e) => {
+  const releaseMapListeners = () => {
+    window.removeEventListener('pointermove', handleMapPointerMove);
+    window.removeEventListener('pointerup', handleMapPointerUp);
+  };
+
+  const handleMapWheel = (e) => {
     e.preventDefault();
-    dragRef.current = {
-      offsetX: e.clientX - menuPos.x,
-      offsetY: e.clientY - menuPos.y,
-    };
-    window.addEventListener('pointermove', handleMenuDragMove);
-    window.addEventListener('pointerup', handleMenuDragEnd);
+    const next = clamp(mapScaleRef.current + (e.deltaY > 0 ? -0.06 : 0.06), 0.7, 1.6);
+    updateMapScale(next);
   };
 
-  useEffect(() => {
-    return () => {
-      window.removeEventListener('pointermove', handleMenuDragMove);
-      window.removeEventListener('pointerup', handleMenuDragEnd);
-    };
-  }, []);
+  const handleMapPointerMove = (e) => {
+    if (!mapTouchesRef.current.has(e.pointerId)) return;
+    mapTouchesRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    const activeTouches = Array.from(mapTouchesRef.current.values());
+
+    if (activeTouches.length >= 2) {
+      const [a, b] = activeTouches;
+      const dist = Math.hypot(a.x - b.x, a.y - b.y);
+      if (!pinchRef.current.base) {
+        pinchRef.current.base = dist;
+        pinchRef.current.start = mapScaleRef.current;
+      } else {
+        const next = clamp((dist / pinchRef.current.base) * pinchRef.current.start, 0.7, 1.6);
+        updateMapScale(next);
+      }
+      mapDragRef.current = { id: null, pointerId: null, moved: false };
+      return;
+    }
+
+    if (mapDragRef.current?.id && mapDragRef.current.pointerId === e.pointerId) {
+      const coords = svgCoords(e.clientX, e.clientY);
+      if (!coords) return;
+      mapDragRef.current.moved = true;
+      setMapNodes((prev) =>
+        prev.map((node) => (node.id === mapDragRef.current.id ? { ...node, ...coords } : node))
+      );
+    }
+  };
+
+  const enterFrom2d = (id) => {
+    if (!id || inputLockedRef.current) return;
+    actionsRef.current.select?.(id);
+    if (worldPresets[id]) {
+      actionsRef.current.enter?.();
+    }
+  };
+
+  const handleMapPointerUp = (e) => {
+    mapTouchesRef.current.delete(e.pointerId);
+    if (mapTouchesRef.current.size < 2) {
+      pinchRef.current.base = null;
+    }
+    if (mapDragRef.current?.pointerId === e.pointerId) {
+      const drag = mapDragRef.current;
+      if (!drag.moved) {
+        enterFrom2d(drag.id);
+      }
+      mapDragRef.current = { id: null, pointerId: null, moved: false };
+    }
+    if (mapTouchesRef.current.size === 0) {
+      releaseMapListeners();
+    }
+  };
+
+  const handleNodePointerDown = (id) => (e) => {
+    e.preventDefault();
+    mapTouchesRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    mapDragRef.current = { id, pointerId: e.pointerId, moved: false };
+    window.addEventListener('pointermove', handleMapPointerMove);
+    window.addEventListener('pointerup', handleMapPointerUp);
+  };
+
+  const handleMapBackgroundPointerDown = (e) => {
+    if (e.target?.closest('[data-node]')) return;
+    e.preventDefault();
+    mapTouchesRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    mapDragRef.current = { id: null, pointerId: null, moved: false };
+    window.addEventListener('pointermove', handleMapPointerMove);
+    window.addEventListener('pointerup', handleMapPointerUp);
+  };
+
+  useEffect(() => () => releaseMapListeners(), []);
 
   if (!ready) {
     return <div style={{ padding: '24px', color: 'rgba(227,241,255,0.7)' }}>Chargement de l’espace…</div>;
   }
 
-  const canEnter = selected && worldPresets[selected] && mode === 'sculpture';
-  const canExit = mode === 'monde';
+  const canEnter = selected && worldPresets[selected] && spaceMode === 'reseau' && !inputLockedRef.current;
+  const canExit = spaceMode === 'bulle';
+  const sceneVisible = viewMode !== '2d' || spaceMode === 'bulle';
 
   return (
     <div id="aframe-shell" className="immersive-shell">
       <div
         ref={mountRef}
         className="scene-mount"
-        style={{ opacity: viewMode === '2d' ? 0 : 1, pointerEvents: viewMode === '2d' ? 'none' : 'auto' }}
+        style={{ opacity: sceneVisible ? 1 : 0, pointerEvents: sceneVisible ? 'auto' : 'none' }}
       />
 
-      {viewMode === '2d' && (
-        <div className="map2d">
-          <svg viewBox="0 0 100 100" role="presentation">
+      {viewMode === '2d' && spaceMode === 'reseau' && (
+        <div className="map2d" onWheel={handleMapWheel}>
+          <svg
+            ref={mapRef}
+            viewBox="0 0 100 100"
+            role="presentation"
+            onPointerDown={handleMapBackgroundPointerDown}
+            style={{ transform: `scale(${mapScale})` }}
+          >
             {links.map(({ a, b }) => {
-              const from = twoDNodes.find((n) => n.id === a);
-              const to = twoDNodes.find((n) => n.id === b);
+              const from = mapNodes.find((n) => n.id === a);
+              const to = mapNodes.find((n) => n.id === b);
               if (!from || !to) return null;
               return <line key={`${a}-${b}`} x1={from.x} y1={from.y} x2={to.x} y2={to.y} className="map-link" />;
             })}
-            {twoDNodes.map((node) => (
-              <g key={node.id} onClick={() => selectFromUi(node.id)} className="map-node" role="button" tabIndex={0}>
+            {mapNodes.map((node) => (
+              <g
+                key={node.id}
+                data-node
+                onPointerDown={handleNodePointerDown(node.id)}
+                className="map-node"
+                role="button"
+                tabIndex={0}
+              >
                 <circle
                   cx={node.x}
                   cy={node.y}
@@ -678,74 +810,44 @@ export default function EchoBulle() {
               </g>
             ))}
           </svg>
-          <div className="map-legend">Vue 2D · tap pour sélectionner · utilise Entrer / Sortir pour voyager</div>
+          <div className="map-overlay">Tap court pour entrer · pinch/molette pour zoomer · glisse une bulle pour réorganiser</div>
         </div>
       )}
 
       <div className="ui-layer">
-        <div
-          className="floating-menu"
-          style={{ left: `${menuPos.x}px`, top: `${menuPos.y}px` }}
-        >
-          <div className="menu-top">
-            <div
-              className="menu-handle"
-              role="presentation"
-              onPointerDown={handleMenuDragStart}
-            >
-              ▤
-            </div>
-            <div className="menu-views">
-              <button type="button" className={viewMode === '2d' ? 'chip active' : 'chip'} onClick={switchTo2d}>
-                2D
-              </button>
-              <button type="button" className={viewMode === '3d' ? 'chip active' : 'chip'} onClick={switchTo3d}>
-                3D
-              </button>
-              {xrSupported && (
-                <button type="button" className={viewMode === 'vr' ? 'chip active' : 'chip'} onClick={switchToVr}>
-                  VR 360
-                </button>
-              )}
-            </div>
-            <button
-              type="button"
-              className="chip ghost"
-              aria-label="Réduire le menu"
-              onClick={() => setMenuCollapsed((v) => !v)}
-            >
-              {menuCollapsed ? '▢' : '—'}
+        <div className="view-toggle">
+          <button type="button" className={viewMode === '2d' ? 'chip active' : 'chip'} onClick={switchTo2d}>
+            2D
+          </button>
+          <button type="button" className={viewMode === '3d' ? 'chip active' : 'chip'} onClick={switchTo3d}>
+            3D
+          </button>
+          {xrSupported && (
+            <button type="button" className={viewMode === 'vr' ? 'chip active' : 'chip'} onClick={switchToVr}>
+              VR
             </button>
-          </div>
-
-          {!menuCollapsed && (
-            <>
-              <div className="menu-section">
-                <div className="menu-label">{mode === 'sculpture' ? 'Sculpture' : 'Monde'}</div>
-                <div className="menu-title">{selectedBubble?.title || 'Choisis une bulle'}</div>
-                <div className="menu-caption">
-                  {mode === 'sculpture'
-                    ? 'Glisse pour orienter, pince pour zoomer. Tap/trigger pour sélectionner.'
-                    : 'Immersion ouverte. Le réseau reste intact, sortie immédiate.'}
-                </div>
-              </div>
-
-              <div className="menu-actions">
-                <button type="button" className={`pill ${canEnter ? '' : 'disabled'}`} onClick={enterSelected} disabled={!canEnter}>
-                  Entrer
-                </button>
-                <button type="button" className={`pill ghost ${canExit ? '' : 'disabled'}`} onClick={exitWorld} disabled={!canExit}>
-                  Sortir
-                </button>
-              </div>
-              <div className="menu-hint">Déplace ou replie le menu. Réseau plein écran.</div>
-            </>
           )}
         </div>
 
-        <div className="minimal-hints">
-          <span className="hint-pill">Mobile : drag/zoom · Tap pour sélectionner</span>
-          <span className="hint-pill">VR : grip pour saisir · Trigger pour viser</span>
+        <div className="action-dock">
+          {viewMode === '2d' ? (
+            spaceMode === 'bulle' ? (
+              <button type="button" className="pill" onClick={exitWorld} disabled={!canExit}>
+                Retour réseau
+              </button>
+            ) : (
+              <div className="action-hint">Mode 2D : tap pour ouvrir une bulle, pinch pour zoomer</div>
+            )
+          ) : (
+            <>
+              <button type="button" className={`pill ${canEnter ? '' : 'disabled'}`} onClick={enterSelected} disabled={!canEnter}>
+                Entrer
+              </button>
+              <button type="button" className={`pill ghost ${canExit ? '' : 'disabled'}`} onClick={exitWorld} disabled={!canExit}>
+                Sortir
+              </button>
+            </>
+          )}
         </div>
       </div>
     </div>

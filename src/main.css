@@ -47,46 +47,39 @@ body {
   pointer-events: none;
 }
 
-.floating-menu {
+.view-toggle {
   position: absolute;
-  min-width: 240px;
-  max-width: 320px;
-  background: var(--panel);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 14px;
-  padding: 12px 14px;
-  box-shadow: 0 18px 36px rgba(0, 0, 0, 0.32);
-  backdrop-filter: blur(12px) saturate(135%);
-  pointer-events: auto;
-  touch-action: none;
-}
-
-.menu-top {
-  display: flex;
-  align-items: center;
+  top: 14px;
+  left: 14px;
+  display: inline-flex;
   gap: 8px;
-  margin-bottom: 8px;
+  pointer-events: auto;
+  background: rgba(6, 12, 20, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  padding: 8px;
+  backdrop-filter: blur(10px);
 }
 
-.menu-handle {
-  display: inline-flex;
+.action-dock {
+  position: absolute;
+  bottom: 14px;
+  right: 14px;
+  display: flex;
+  gap: 10px;
   align-items: center;
-  justify-content: center;
-  width: 32px;
-  height: 32px;
-  border-radius: 10px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(233, 242, 255, 0.06);
-  color: rgba(233, 242, 255, 0.8);
-  margin-bottom: 8px;
-  cursor: grab;
-  user-select: none;
+  pointer-events: auto;
+  background: rgba(6, 12, 20, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  padding: 10px 12px;
+  backdrop-filter: blur(10px);
 }
 
-.menu-views {
-  display: inline-flex;
-  gap: 6px;
-  flex: 1;
+.action-hint {
+  font-size: 13px;
+  color: rgba(233, 242, 255, 0.82);
+  opacity: 0.86;
 }
 
 .chip {
@@ -110,37 +103,6 @@ body {
 .chip.ghost {
   background: rgba(233, 242, 255, 0.06);
   border-color: rgba(233, 242, 255, 0.2);
-}
-
-.menu-section {
-  display: grid;
-  gap: 4px;
-  margin-bottom: 10px;
-}
-
-.menu-label {
-  font-size: 12px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  opacity: 0.7;
-}
-
-.menu-title {
-  font-size: 18px;
-  font-weight: 700;
-}
-
-.menu-caption {
-  font-size: 13px;
-  opacity: 0.78;
-  line-height: 1.45;
-}
-
-.menu-actions {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-  margin-bottom: 8px;
 }
 
 .pill {
@@ -168,34 +130,6 @@ body {
   filter: saturate(70%);
 }
 
-.menu-hint {
-  font-size: 12px;
-  opacity: 0.7;
-}
-
-.minimal-hints {
-  position: absolute;
-  bottom: 14px;
-  left: 50%;
-  transform: translateX(-50%);
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-  justify-content: center;
-  pointer-events: none;
-}
-
-.hint-pill {
-  padding: 7px 10px;
-  border-radius: 12px;
-  background: rgba(6, 12, 20, 0.58);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  font-size: 12px;
-  color: rgba(233, 242, 255, 0.82);
-  box-shadow: 0 12px 24px rgba(0, 0, 0, 0.22);
-  backdrop-filter: blur(10px);
-}
-
 .map2d {
   position: absolute;
   inset: 0;
@@ -204,11 +138,14 @@ body {
   background: radial-gradient(circle at 40% 30%, rgba(127, 206, 255, 0.12), transparent 42%),
     linear-gradient(160deg, rgba(4, 7, 13, 0.9), rgba(10, 21, 33, 0.9));
   pointer-events: auto;
+  touch-action: none;
 }
 
 .map2d svg {
   width: min(720px, 96vw);
   height: min(520px, 76vh);
+  transform-origin: center;
+  transition: transform 0.18s ease;
 }
 
 .map-link {
@@ -218,6 +155,7 @@ body {
 
 .map-node {
   cursor: pointer;
+  touch-action: none;
 }
 
 .map-bubble {
@@ -240,13 +178,13 @@ body {
   dominant-baseline: hanging;
 }
 
-.map-legend {
+.map-overlay {
   margin-top: 10px;
-  padding: 8px 12px;
+  padding: 9px 12px;
   border-radius: 12px;
-  background: rgba(6, 12, 20, 0.64);
+  background: rgba(6, 12, 20, 0.7);
   border: 1px solid rgba(255, 255, 255, 0.1);
-  color: rgba(233, 242, 255, 0.82);
+  color: rgba(233, 242, 255, 0.9);
   font-size: 12px;
-  backdrop-filter: blur(10px);
+  backdrop-filter: blur(12px);
 }
