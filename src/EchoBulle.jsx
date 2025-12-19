@@ -46,35 +46,6 @@ function registerComponents() {
     },
   });
 
-  window.AFRAME.registerComponent('soft-select', {
-    schema: { id: { type: 'string' } },
-    init() {
-      const el = this.el;
-      const scene = el.sceneEl;
-      el.classList.add('selectable');
-
-      const hoverIn = () => scene?.emit('bubble-hover', { id: this.data.id });
-      const hoverOut = () => scene?.emit('bubble-hover', { id: null });
-      const select = () => {
-        scene?.emit('bubble-select', { id: this.data.id });
-        startAmbient();
-      };
-
-      el.addEventListener('mouseenter', hoverIn);
-      el.addEventListener('mouseleave', hoverOut);
-      el.addEventListener('click', select);
-
-      this.cleanup = () => {
-        el.removeEventListener('mouseenter', hoverIn);
-        el.removeEventListener('mouseleave', hoverOut);
-        el.removeEventListener('click', select);
-      };
-    },
-    remove() {
-      this.cleanup?.();
-    },
-  });
-
   window.AFRAME.registerComponent('soft-pulse', {
     schema: { base: { default: 1 }, boost: { default: 0.08 } },
     tick(time) {
@@ -90,6 +61,81 @@ function registerComponents() {
       const release = () => scene?.emit('backdrop-release');
       el.addEventListener('click', release);
       this.remove = () => el.removeEventListener('click', release);
+    },
+  });
+
+  window.AFRAME.registerComponent('fractal-node', {
+    schema: { id: { type: 'string' } },
+    init() {
+      const { id } = this.data;
+      const el = this.el;
+      const scene = el.sceneEl;
+      let holdTimer = null;
+      let longTriggered = false;
+      let hadPointer = false;
+
+      const focus = () => scene?.emit('bubble-focus', { id });
+      const enter = () => {
+        scene?.emit('bubble-enter', { id });
+        startAmbient();
+      };
+
+      const clearTimer = () => {
+        if (holdTimer) clearTimeout(holdTimer);
+        holdTimer = null;
+      };
+
+      const pointerDown = () => {
+        hadPointer = true;
+        longTriggered = false;
+        clearTimer();
+        holdTimer = setTimeout(() => {
+          longTriggered = true;
+          enter();
+        }, 650);
+      };
+
+      const pointerUp = () => {
+        if (holdTimer) {
+          clearTimer();
+          if (!longTriggered) focus();
+        }
+        longTriggered = false;
+        setTimeout(() => {
+          hadPointer = false;
+        }, 0);
+      };
+
+      const hoverIn = () => scene?.emit('bubble-hover', { id });
+      const hoverOut = () => scene?.emit('bubble-hover', { id: null });
+
+      const click = () => {
+        // Fuse / gaze click in VR has no pointer phase: treat as enter.
+        if (hadPointer) return;
+        enter();
+      };
+
+      el.classList.add('selectable');
+      el.addEventListener('mouseenter', hoverIn);
+      el.addEventListener('mouseleave', hoverOut);
+      el.addEventListener('mousedown', pointerDown);
+      el.addEventListener('mouseup', pointerUp);
+      el.addEventListener('touchstart', pointerDown);
+      el.addEventListener('touchend', pointerUp);
+      el.addEventListener('click', click);
+
+      this.cleanup = () => {
+        el.removeEventListener('mouseenter', hoverIn);
+        el.removeEventListener('mouseleave', hoverOut);
+        el.removeEventListener('mousedown', pointerDown);
+        el.removeEventListener('mouseup', pointerUp);
+        el.removeEventListener('touchstart', pointerDown);
+        el.removeEventListener('touchend', pointerUp);
+        el.removeEventListener('click', click);
+      };
+    },
+    remove() {
+      this.cleanup?.();
     },
   });
 }
@@ -122,8 +168,10 @@ export default function EchoBulle() {
   const ready = useAframe();
   const mountRef = useRef(null);
   const sceneRef = useRef(null);
-  const focusRef = useRef(null);
+  const focusRef = useRef('root');
   const hoverRef = useRef(null);
+  const activeRef = useRef('root');
+  const worldRef = useRef(null);
   const [xrSupported, setXrSupported] = useState(false);
 
   useEffect(() => {
@@ -184,8 +232,9 @@ export default function EchoBulle() {
     cameraRig.appendChild(camera);
     scene.appendChild(cameraRig);
 
-    const cluster = document.createElement('a-entity');
-    cluster.setAttribute('position', '0 0 -3');
+    const world = document.createElement('a-entity');
+    world.id = 'world';
+    world.setAttribute('position', '0 0 -3');
 
     links.forEach(({ a, b }) => {
       const from = bubbles.find((n) => n.id === a);
@@ -196,7 +245,7 @@ export default function EchoBulle() {
       link.setAttribute('line', `start: ${from.position.x} ${from.position.y} ${from.position.z}; end: ${to.position.x} ${to.position.y} ${to.position.z}; color: ${palette.link}`);
       link.setAttribute('material', 'opacity: 0.32');
       linkRefs.push(link);
-      cluster.appendChild(link);
+      world.appendChild(link);
     });
 
     bubbles.forEach((bubble) => {
@@ -209,7 +258,7 @@ export default function EchoBulle() {
       sphere.className = 'selectable';
       sphere.setAttribute('radius', '0.32');
       sphere.setAttribute('color', palette.calm);
-      sphere.setAttribute('soft-select', `id: ${id}`);
+      sphere.setAttribute('fractal-node', `id: ${id}`);
       sphere.setAttribute('soft-pulse', 'base: 1; boost: 0.04');
       sphere.setAttribute('material', `roughness: 0.3; metalness: 0.02; opacity: 0.75; transparent: true; emissive: ${palette.glow}; emissiveIntensity: 0.18`);
       const sphereAnim = document.createElement('a-animation');
@@ -229,76 +278,111 @@ export default function EchoBulle() {
 
       wrapper.appendChild(sphere);
       wrapper.appendChild(label);
-      cluster.appendChild(wrapper);
+      world.appendChild(wrapper);
 
-      bubbleRefs.set(id, { wrapper, sphere, label, level, title });
+      bubbleRefs.set(id, { wrapper, sphere, label, level, title, position });
     });
 
-    const applyState = () => {
-      const focusId = focusRef.current;
-      const hoverId = hoverRef.current;
-      const visibleSet = focusId ? relatedIds(focusId) : null;
+    const setActiveBubble = (id, { keepFocus = false } = {}) => {
+      const target = bubbles.find((b) => b.id === id) ?? bubbles[0];
+      activeRef.current = target.id;
+      if (!keepFocus) {
+        focusRef.current = target.id;
+      }
+
+      const visibleSet = relatedIds(target.id);
 
       linkRefs.forEach((link) => {
         const [a, b] = link.dataset.link.split('::');
-        const inFocus = !visibleSet || (visibleSet.has(a) && visibleSet.has(b));
-        const opacity = inFocus ? 0.32 : 0.08;
+        const inFocus = visibleSet.has(a) && visibleSet.has(b);
+        const opacity = inFocus ? 0.32 : 0.04;
         link.setAttribute('material', `color: ${palette.link}; opacity: ${opacity}`);
       });
 
-      bubbleRefs.forEach(({ sphere, label, level, title }, id) => {
-        const isFocus = focusId === id;
-        const isHover = hoverId === id;
-        const isActive = !visibleSet || visibleSet.has(id);
-        const opacity = isActive ? (isFocus ? 0.95 : 0.75) : 0.22;
-        const scale = isFocus ? 1.15 : isHover ? 1.08 : 1;
+      bubbleRefs.forEach(({ sphere, label, level, title, position }, bubbleId) => {
+        const isActive = visibleSet.has(bubbleId);
+        const isFocus = bubbleId === focusRef.current;
+        const isHover = bubbleId === hoverRef.current;
+        const opacity = isActive ? (isFocus ? 0.95 : 0.78) : 0.12;
+        const scale = isFocus ? 1.18 : isHover ? 1.08 : isActive ? 1.02 : 0.82;
 
         sphere.setAttribute(
           'material',
-          `roughness: 0.3; metalness: 0.02; opacity: ${opacity}; transparent: true; emissive: ${palette.glow}; emissiveIntensity: ${isFocus ? 0.35 : 0.18}`,
+          `roughness: 0.32; metalness: 0.02; opacity: ${opacity}; transparent: true; emissive: ${palette.glow}; emissiveIntensity: ${isFocus ? 0.38 : 0.18}`,
         );
-        sphere.setAttribute('soft-pulse', `base: ${scale}; boost: 0.04`);
-        sphere.querySelector('a-animation')?.setAttribute('to', opacity);
+        sphere.setAttribute('soft-pulse', `base: ${scale}; boost: ${isActive ? 0.05 : 0.02}`);
+        sphere.setAttribute('visible', isActive || isHover || isFocus);
 
         label.setAttribute(
           'text',
-          `value: ${title}\nNiveau ${level}; align: center; color: ${palette.glow}; opacity: ${isActive ? 0.9 : 0.35}; width: 2`,
+          `value: ${title}\nNiveau ${level}; align: center; color: ${palette.glow}; opacity: ${isActive ? 0.88 : 0.2}; width: 2`,
         );
+
+        // keep a gentle glow hint even when masked
+        label.setAttribute('visible', isActive);
+
+        if (bubbleId === target.id && worldRef.current) {
+          const anchor = { x: 0, y: 1.35, z: -3.2 };
+          const to = {
+            x: anchor.x - position.x,
+            y: anchor.y - position.y,
+            z: anchor.z - position.z,
+          };
+          worldRef.current.setAttribute('animation__move', `property: position; to: ${to.x} ${to.y} ${to.z}; dur: 1000; easing: easeInOutCubic`);
+          worldRef.current.setAttribute('animation__scale', 'property: scale; to: 1.05 1.05 1.05; dur: 900; easing: easeInOutQuad');
+        }
       });
     };
 
-    const handleSelect = (e) => {
-      focusRef.current = e.detail.id;
-      applyState();
+    const softFocus = (id) => {
+      focusRef.current = id;
+      setActiveBubble(activeRef.current, { keepFocus: true });
     };
 
-    const handleHover = (e) => {
-      hoverRef.current = e.detail.id;
-      applyState();
+    const softHover = (id) => {
+      hoverRef.current = id;
+      setActiveBubble(activeRef.current, { keepFocus: true });
     };
 
-    const handleBackdrop = () => {
-      focusRef.current = null;
-      hoverRef.current = null;
-      applyState();
+    const openParent = () => {
+      const current = bubbles.find((b) => b.id === activeRef.current);
+      if (current?.parent) {
+        setActiveBubble(current.parent);
+      } else {
+        setActiveBubble(activeRef.current);
+      }
     };
 
-    scene.addEventListener('bubble-select', handleSelect);
+    const handleEnter = (e) => setActiveBubble(e.detail.id);
+    const handleFocus = (e) => softFocus(e.detail.id);
+    const handleHover = (e) => softHover(e.detail.id);
+
+    scene.addEventListener('bubble-enter', handleEnter);
+    scene.addEventListener('bubble-focus', handleFocus);
     scene.addEventListener('bubble-hover', handleHover);
-    scene.addEventListener('backdrop-release', handleBackdrop);
+    scene.addEventListener('backdrop-release', openParent);
 
-    cluster.addEventListener('loaded', applyState, { once: true });
-    scene.appendChild(cluster);
+    world.addEventListener(
+      'loaded',
+      () => {
+        worldRef.current = world;
+        setActiveBubble(activeRef.current);
+      },
+      { once: true },
+    );
+
+    scene.appendChild(world);
     sceneRef.current = scene;
     mountRef.current.appendChild(scene);
 
     return () => {
-      scene.removeEventListener('bubble-select', handleSelect);
+      scene.removeEventListener('bubble-enter', handleEnter);
+      scene.removeEventListener('bubble-focus', handleFocus);
       scene.removeEventListener('bubble-hover', handleHover);
-      scene.removeEventListener('backdrop-release', handleBackdrop);
-      cluster.removeEventListener('loaded', applyState);
+      scene.removeEventListener('backdrop-release', openParent);
       mountRef.current?.removeChild(scene);
       sceneRef.current = null;
+      worldRef.current = null;
     };
   }, [ready]);
 
