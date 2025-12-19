@@ -47,34 +47,58 @@ body {
   pointer-events: none;
 }
 
-.view-toggle {
-  position: absolute;
-  top: 14px;
-  left: 14px;
+
+.floating-panel {
+  position: fixed;
+  pointer-events: auto;
+  background: rgba(6, 12, 20, 0.78);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 14px;
+  backdrop-filter: blur(12px);
+  box-shadow: 0 14px 38px rgba(0, 0, 0, 0.35);
+}
+
+.panel-handle {
+  width: calc(100% + 8px);
+  margin: -6px -4px 8px;
+  height: 14px;
+  border-radius: 12px;
+  border: 1px dashed rgba(233, 242, 255, 0.18);
+  background: linear-gradient(90deg, rgba(233, 242, 255, 0.06), rgba(127, 206, 255, 0.12), rgba(233, 242, 255, 0.06));
+  cursor: grab;
+  touch-action: none;
+}
+
+.panel-handle:active {
+  cursor: grabbing;
+}
+
+.panel-actions {
   display: inline-flex;
   gap: 8px;
-  pointer-events: auto;
-  background: rgba(6, 12, 20, 0.7);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 12px;
   padding: 8px;
-  backdrop-filter: blur(10px);
+}
+
+.view-toggle {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 160px;
 }
 
 .action-dock {
-  position: absolute;
-  bottom: 14px;
-  right: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-width: min(640px, 94vw);
+  padding: 12px 14px 14px;
+}
+
+.action-body {
   display: flex;
   gap: 12px;
-  align-items: center;
+  align-items: flex-start;
   flex-wrap: wrap;
-  pointer-events: auto;
-  background: rgba(6, 12, 20, 0.7);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 12px;
-  padding: 12px 14px;
-  backdrop-filter: blur(10px);
 }
 
 .action-info {
@@ -98,6 +122,14 @@ body {
   display: flex;
   gap: 10px;
   align-items: center;
+  flex: 1;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+.action-buttons .pill {
+  flex: 1 1 160px;
+  min-width: 150px;
 }
 
 .chip {
@@ -301,4 +333,23 @@ body {
   margin: 6px 0 0;
   font-size: 14px;
   line-height: 1.5;
+}
+
+@media (max-width: 720px) {
+  .action-body {
+    flex-direction: column;
+  }
+
+  .action-info {
+    width: 100%;
+  }
+
+  .action-buttons {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .action-buttons .pill {
+    flex-basis: 100%;
+  }
 }

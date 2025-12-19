@@ -4,6 +4,91 @@ import { startAmbient } from './audio.js';
 
 const AFRAME_CDN = 'https://aframe.io/releases/1.5.0/aframe.min.js';
 
+function clamp(value, min, max) {
+  return Math.min(Math.max(value, min), max);
+}
+
+function useDraggablePanel(initial) {
+  const ref = useRef(null);
+  const [pos, setPos] = useState(() => {
+    if (typeof initial === 'function') return initial();
+    return initial;
+  });
+  const dragRef = useRef(null);
+
+  const boundToViewport = (next) => {
+    const rect = ref.current?.getBoundingClientRect();
+    const width = rect?.width ?? 260;
+    const height = rect?.height ?? 120;
+    const maxX = Math.max(8, (typeof window !== 'undefined' ? window.innerWidth : width) - width - 8);
+    const maxY = Math.max(8, (typeof window !== 'undefined' ? window.innerHeight : height) - height - 8);
+    return {
+      x: clamp(next.x, 8, maxX),
+      y: clamp(next.y, 8, maxY),
+    };
+  };
+
+  useEffect(() => {
+    setPos((current) => boundToViewport(current));
+  }, []);
+
+  useEffect(() => {
+    const handleMove = (e) => {
+      if (!dragRef.current) return;
+      e.preventDefault();
+      const { startX, startY, originX, originY, size } = dragRef.current;
+      const dx = e.clientX - startX;
+      const dy = e.clientY - startY;
+      const width = size?.width ?? ref.current?.getBoundingClientRect()?.width ?? 260;
+      const height = size?.height ?? ref.current?.getBoundingClientRect()?.height ?? 120;
+      const maxX = Math.max(8, (typeof window !== 'undefined' ? window.innerWidth : width) - width - 8);
+      const maxY = Math.max(8, (typeof window !== 'undefined' ? window.innerHeight : height) - height - 8);
+
+      setPos({
+        x: clamp(originX + dx, 8, maxX),
+        y: clamp(originY + dy, 8, maxY),
+      });
+    };
+
+    const stop = () => {
+      dragRef.current = null;
+    };
+
+    const reframe = () => setPos((current) => boundToViewport(current));
+
+    window.addEventListener('pointermove', handleMove, { passive: false });
+    window.addEventListener('pointerup', stop);
+    window.addEventListener('pointercancel', stop);
+    window.addEventListener('resize', reframe);
+    return () => {
+      window.removeEventListener('pointermove', handleMove);
+      window.removeEventListener('pointerup', stop);
+      window.removeEventListener('pointercancel', stop);
+      window.removeEventListener('resize', reframe);
+    };
+  }, []);
+
+  const startDrag = (e) => {
+    if (e.button && e.button !== 0) return;
+    e.stopPropagation();
+    const rect = ref.current?.getBoundingClientRect();
+    dragRef.current = {
+      startX: e.clientX,
+      startY: e.clientY,
+      originX: pos.x ?? rect?.left ?? 12,
+      originY: pos.y ?? rect?.top ?? 12,
+      size: rect,
+    };
+    ref.current?.setPointerCapture?.(e.pointerId);
+  };
+
+  return {
+    ref,
+    position: boundToViewport(pos),
+    startDrag,
+  };
+}
+
 function useAframe() {
   const [ready, setReady] = useState(typeof window !== 'undefined' && !!window.AFRAME);
 
@@ -387,6 +472,11 @@ export default function EchoBulle() {
   const mapTouchesRef = useRef(new Map());
   const mapDragRef = useRef({ id: null, pointerId: null, moved: false });
   const pinchRef = useRef({ base: null, start: 1 });
+  const viewPanel = useDraggablePanel({ x: 16, y: 16 });
+  const actionPanel = useDraggablePanel(() => ({
+    x: 16,
+    y: (typeof window !== 'undefined' ? window.innerHeight : 760) - 190,
+  }));
 
   useEffect(() => {
     if (!ready) return;
@@ -865,45 +955,64 @@ export default function EchoBulle() {
       )}
 
       <div className="ui-layer">
-        <div className="view-toggle">
-          <button type="button" className={viewMode === '2d' ? 'chip active' : 'chip'} onClick={switchTo2d}>
-            2D
-          </button>
-          <button type="button" className={viewMode === '3d' ? 'chip active' : 'chip'} onClick={switchTo3d}>
-            3D
-          </button>
-          {xrSupported && (
-            <button type="button" className={viewMode === 'vr' ? 'chip active' : 'chip'} onClick={switchToVr}>
-              VR
+        <div
+          className="floating-panel view-toggle"
+          ref={viewPanel.ref}
+          style={{ left: viewPanel.position.x, top: viewPanel.position.y }}
+        >
+          <div className="panel-handle" onPointerDown={viewPanel.startDrag} aria-label="Déplacer le menu des vues" />
+          <div className="panel-actions">
+            <button type="button" className={viewMode === '2d' ? 'chip active' : 'chip'} onClick={switchTo2d}>
+              2D
             </button>
-          )}
+            <button type="button" className={viewMode === '3d' ? 'chip active' : 'chip'} onClick={switchTo3d}>
+              3D
+            </button>
+            {xrSupported && (
+              <button type="button" className={viewMode === 'vr' ? 'chip active' : 'chip'} onClick={switchToVr}>
+                VR
+              </button>
+            )}
+          </div>
         </div>
 
-        <div className="action-dock">
-          <div className="action-info">
-            <div className="action-title">{selectedBubble?.title ?? 'Choisis une bulle'}</div>
-            <div className="action-meta">{selectionMeta}</div>
-          </div>
-          <div className="action-buttons">
-            {spaceMode === 'bulle' ? (
-              <button type="button" className="pill" onClick={exitWorld} disabled={!canExit}>
-                Retour réseau
-              </button>
-            ) : (
-              <>
-                <button type="button" className={`pill ${canEnter ? '' : 'disabled'}`} onClick={enterSelected} disabled={!canEnter}>
-                  Entrer dans la bulle
+        <div
+          className="floating-panel action-dock"
+          ref={actionPanel.ref}
+          style={{ left: actionPanel.position.x, top: actionPanel.position.y }}
+        >
+          <div className="panel-handle" onPointerDown={actionPanel.startDrag} aria-label="Déplacer le dock d'action" />
+          <div className="action-body">
+            <div className="action-info">
+              <div className="action-title">{selectedBubble?.title ?? 'Choisis une bulle'}</div>
+              <div className="action-meta">{selectionMeta}</div>
+            </div>
+            <div className="action-buttons">
+              {spaceMode === 'bulle' ? (
+                <button type="button" className="pill" onClick={exitWorld} disabled={!canExit}>
+                  Retour réseau
                 </button>
-                <button
-                  type="button"
-                  className={viewMode === '2d' ? 'pill ghost active-light' : 'pill ghost'}
-                  onClick={switchTo3d}
-                  disabled={viewMode === '3d'}
-                >
-                  Vue spatiale
-                </button>
-              </>
-            )}
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    className={`pill ${canEnter ? '' : 'disabled'}`}
+                    onClick={enterSelected}
+                    disabled={!canEnter}
+                  >
+                    Entrer dans la bulle
+                  </button>
+                  <button
+                    type="button"
+                    className={viewMode === '2d' ? 'pill ghost active-light' : 'pill ghost'}
+                    onClick={switchTo3d}
+                    disabled={viewMode === '3d'}
+                  >
+                    Vue spatiale
+                  </button>
+                </>
+              )}
+            </div>
           </div>
         </div>
       </div>
