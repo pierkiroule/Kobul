@@ -446,6 +446,9 @@ export default function EchoBulle() {
     actionsRef.current.exit?.();
   };
 
+  const selectedBubble = bubbles.find((b) => b.id === selected);
+  const worldPreset = selected ? worldPresets[selected] : null;
+
   if (!ready) {
     return <div style={{ padding: '24px', color: 'rgba(227,241,255,0.7)' }}>Chargement de l’espace…</div>;
   }
@@ -454,33 +457,80 @@ export default function EchoBulle() {
   const canExit = mode === 'monde';
 
   return (
-    <div id="aframe-shell" style={{ position: 'relative', width: '100%', height: '100%' }}>
-      <div ref={mountRef} style={{ width: '100%', height: '100%' }} />
-      <div className="hud">
-        <div className="pill">{mode === 'sculpture' ? 'Sculpture' : 'Monde'}</div>
-        {selected && (
-          <div className="pill subtle">Bulle : {selected}</div>
-        )}
-        {canEnter && (
-          <button type="button" className="action" onClick={enterSelected}>
-            Entrer
-          </button>
-        )}
-        {canExit && (
-          <button type="button" className="action ghost" onClick={exitWorld}>
-            Sortir
-          </button>
-        )}
+    <div id="aframe-shell" className="immersive-shell">
+      <div ref={mountRef} className="scene-mount" />
+
+      <div className="ui-layer">
+        <div className="info-panel glass">
+          <div className="eyebrow">Mode</div>
+          <div className="headline">{mode === 'sculpture' ? 'Sculpture manipulable' : 'Monde immersif'}</div>
+          <p className="micro">{mode === 'sculpture'
+            ? 'Fais pivoter la sculpture, zoom doux, sélectionne un portail.'
+            : 'World chargé : respire, contemple, sors quand tu veux.'}
+          </p>
+        </div>
+
+        <div className="selection-panel glass">
+          <div className="eyebrow">Bulle active</div>
+          <div className="selection-title">{selectedBubble?.title || 'Choisis un portail'}</div>
+          <div className="badge-row">
+            <span className="chip">ID · {selected || '—'}</span>
+            <span className="chip ghost">Niveau {selectedBubble?.level ?? '—'}</span>
+            {mode === 'monde' && <span className="chip pulse">Immersion en cours</span>}
+          </div>
+
+          {worldPreset && (
+            <div className="world-preview">
+              <div className="world-grad" style={{ background: `radial-gradient(circle at 30% 30%, ${worldPreset.fx.color}, ${worldPreset.sky})` }} />
+              <div>
+                <div className="eyebrow">World palette</div>
+                <div className="micro">Ciel {worldPreset.sky} · Halo {worldPreset.fx.color}</div>
+              </div>
+            </div>
+          )}
+
+          <div className="cta-row">
+            <button
+              type="button"
+              className={`cta ${canEnter ? '' : 'disabled'}`}
+              onClick={enterSelected}
+              disabled={!canEnter}
+            >
+              Entrer dans le monde
+            </button>
+            <button
+              type="button"
+              className={`cta ghost ${canExit ? '' : 'disabled'}`}
+              onClick={exitWorld}
+              disabled={!canExit}
+            >
+              Sortir / Revenir
+            </button>
+          </div>
+        </div>
+
+        <div className="hint-stack">
+          <div className="hint-card">
+            <div className="eyebrow">Mobile</div>
+            <div>1 doigt : rotation / glisser · 2 doigts : zoom.</div>
+            <div>Tap = sélection · Bouton = entrer / sortir.</div>
+          </div>
+          <div className="hint-card">
+            <div className="eyebrow">VR</div>
+            <div>Grip : saisir la sculpture · Trigger : sélectionner.</div>
+            <div>Bouton A / X : entrer ou sortir du monde.</div>
+          </div>
+        </div>
+
+        <div className="vr-dock">
+          <div className="chip ghost">{xrSupported ? 'VR prête' : 'VR disponible sur casque compatible'}</div>
+          {xrSupported && (
+            <button className="cta mini" type="button" onClick={() => sceneRef.current?.enterVR?.()}>
+              Mode VR
+            </button>
+          )}
+        </div>
       </div>
-      <div className="gesture-hints">
-        <div>Mobile : 1 doigt = rotation, 2 doigts = zoom, tap = sélectionner, bouton = entrer / sortir</div>
-        <div>VR : regard ou trigger pour sélectionner, grip pour manipuler la sculpture, bouton A/X pour entrer/sortir</div>
-      </div>
-      {xrSupported && (
-        <button className="enter-vr" type="button" onClick={() => sceneRef.current?.enterVR?.()}>
-          Mode VR
-        </button>
-      )}
     </div>
   );
 }
