@@ -301,12 +301,14 @@ export default function EchoBulle() {
   const worldContainerRef = useRef(null);
   const bubbleRefs = useRef(new Map());
   const [mode, setMode] = useState('sculpture');
+  const [viewMode, setViewMode] = useState('3d');
   const [selected, setSelected] = useState(null);
   const [xrSupported, setXrSupported] = useState(false);
   const hoverRef = useRef(null);
   const actionsRef = useRef({ enter: null, exit: null });
   const [menuPos, setMenuPos] = useState({ x: 18, y: 18 });
   const dragRef = useRef(null);
+  const [menuCollapsed, setMenuCollapsed] = useState(false);
 
   useEffect(() => {
     if (!ready) return;
@@ -508,6 +510,7 @@ export default function EchoBulle() {
     actionsRef.current = {
       enter: () => showWorld(selectedRef.current),
       exit: leaveWorld,
+      select: selectBubble,
     };
 
     const handleSelect = (e) => selectBubble(e.detail.id);
@@ -524,10 +527,15 @@ export default function EchoBulle() {
       }
     };
 
+    const handleEnterVr = () => setViewMode('vr');
+    const handleExitVr = () => setViewMode('3d');
+
     scene.addEventListener('bubble-selected', handleSelect);
     scene.addEventListener('bubble-hover', handleHover);
     scene.addEventListener('abuttondown', handleControllerEnter);
     scene.addEventListener('xbuttondown', handleControllerEnter);
+    scene.addEventListener('enter-vr', handleEnterVr);
+    scene.addEventListener('exit-vr', handleExitVr);
 
     sceneRef.current = scene;
     sculptureRef.current = sculpture;
@@ -542,6 +550,8 @@ export default function EchoBulle() {
       scene.removeEventListener('bubble-hover', handleHover);
       scene.removeEventListener('abuttondown', handleControllerEnter);
       scene.removeEventListener('xbuttondown', handleControllerEnter);
+      scene.removeEventListener('enter-vr', handleEnterVr);
+      scene.removeEventListener('exit-vr', handleExitVr);
       mountRef.current?.removeChild(scene);
       bubbleRefs.current.clear();
       sceneRef.current = null;
@@ -559,8 +569,45 @@ export default function EchoBulle() {
     actionsRef.current.exit?.();
   };
 
+  const selectFromUi = (id) => {
+    actionsRef.current.select?.(id);
+  };
+
   const selectedBubble = bubbles.find((b) => b.id === selected);
-  const worldPreset = selected ? worldPresets[selected] : null;
+
+  const switchTo2d = () => {
+    setViewMode('2d');
+    sceneRef.current?.exitVR?.();
+  };
+
+  const switchTo3d = () => {
+    setViewMode('3d');
+    sceneRef.current?.exitVR?.();
+  };
+
+  const switchToVr = () => {
+    setViewMode('vr');
+    sceneRef.current?.enterVR?.();
+  };
+
+  const twoDNodes = React.useMemo(() => {
+    const xs = bubbles.map((b) => b.position.x);
+    const zs = bubbles.map((b) => b.position.z);
+    const minX = Math.min(...xs);
+    const maxX = Math.max(...xs);
+    const minZ = Math.min(...zs);
+    const maxZ = Math.max(...zs);
+    const spanX = maxX - minX || 1;
+    const spanZ = maxZ - minZ || 1;
+    return bubbles.map((b) => ({
+      id: b.id,
+      title: b.title,
+      level: b.level,
+      x: ((b.position.x - minX) / spanX) * 100,
+      y: ((b.position.z - minZ) / spanZ) * 100,
+      links: b.links,
+    }));
+  }, []);
 
   const handleMenuDragMove = (e) => {
     if (!dragRef.current) return;
@@ -602,44 +649,98 @@ export default function EchoBulle() {
 
   return (
     <div id="aframe-shell" className="immersive-shell">
-      <div ref={mountRef} className="scene-mount" />
+      <div
+        ref={mountRef}
+        className="scene-mount"
+        style={{ opacity: viewMode === '2d' ? 0 : 1, pointerEvents: viewMode === '2d' ? 'none' : 'auto' }}
+      />
+
+      {viewMode === '2d' && (
+        <div className="map2d">
+          <svg viewBox="0 0 100 100" role="presentation">
+            {links.map(({ a, b }) => {
+              const from = twoDNodes.find((n) => n.id === a);
+              const to = twoDNodes.find((n) => n.id === b);
+              if (!from || !to) return null;
+              return <line key={`${a}-${b}`} x1={from.x} y1={from.y} x2={to.x} y2={to.y} className="map-link" />;
+            })}
+            {twoDNodes.map((node) => (
+              <g key={node.id} onClick={() => selectFromUi(node.id)} className="map-node" role="button" tabIndex={0}>
+                <circle
+                  cx={node.x}
+                  cy={node.y}
+                  r={8 + node.level * 2}
+                  className={selected === node.id ? 'map-bubble active' : 'map-bubble'}
+                />
+                <text x={node.x} y={node.y + 0.6} className="map-label">
+                  {node.title}
+                </text>
+              </g>
+            ))}
+          </svg>
+          <div className="map-legend">Vue 2D · tap pour sélectionner · utilise Entrer / Sortir pour voyager</div>
+        </div>
+      )}
 
       <div className="ui-layer">
         <div
           className="floating-menu"
           style={{ left: `${menuPos.x}px`, top: `${menuPos.y}px` }}
         >
-          <div
-            className="menu-handle"
-            role="presentation"
-            onPointerDown={handleMenuDragStart}
-          >
-            ▤
-          </div>
-          <div className="menu-section">
-            <div className="menu-label">{mode === 'sculpture' ? 'Sculpture' : 'Monde'}</div>
-            <div className="menu-title">{selectedBubble?.title || 'Choisis une bulle'}</div>
-            <div className="menu-caption">
-              {mode === 'sculpture'
-                ? 'Glisse pour orienter, pince pour zoomer. Tap/trigger pour sélectionner.'
-                : 'Immersion ouverte. Le réseau reste intact, sortie immédiate.'}
+          <div className="menu-top">
+            <div
+              className="menu-handle"
+              role="presentation"
+              onPointerDown={handleMenuDragStart}
+            >
+              ▤
             </div>
+            <div className="menu-views">
+              <button type="button" className={viewMode === '2d' ? 'chip active' : 'chip'} onClick={switchTo2d}>
+                2D
+              </button>
+              <button type="button" className={viewMode === '3d' ? 'chip active' : 'chip'} onClick={switchTo3d}>
+                3D
+              </button>
+              {xrSupported && (
+                <button type="button" className={viewMode === 'vr' ? 'chip active' : 'chip'} onClick={switchToVr}>
+                  VR 360
+                </button>
+              )}
+            </div>
+            <button
+              type="button"
+              className="chip ghost"
+              aria-label="Réduire le menu"
+              onClick={() => setMenuCollapsed((v) => !v)}
+            >
+              {menuCollapsed ? '▢' : '—'}
+            </button>
           </div>
 
-          <div className="menu-actions">
-            <button type="button" className={`pill ${canEnter ? '' : 'disabled'}`} onClick={enterSelected} disabled={!canEnter}>
-              Entrer
-            </button>
-            <button type="button" className={`pill ghost ${canExit ? '' : 'disabled'}`} onClick={exitWorld} disabled={!canExit}>
-              Sortir
-            </button>
-            {xrSupported && (
-              <button type="button" className="pill ghost" onClick={() => sceneRef.current?.enterVR?.()}>
-                VR
-              </button>
-            )}
-          </div>
-          <div className="menu-hint">Déplace le menu librement. Le réseau reste plein écran.</div>
+          {!menuCollapsed && (
+            <>
+              <div className="menu-section">
+                <div className="menu-label">{mode === 'sculpture' ? 'Sculpture' : 'Monde'}</div>
+                <div className="menu-title">{selectedBubble?.title || 'Choisis une bulle'}</div>
+                <div className="menu-caption">
+                  {mode === 'sculpture'
+                    ? 'Glisse pour orienter, pince pour zoomer. Tap/trigger pour sélectionner.'
+                    : 'Immersion ouverte. Le réseau reste intact, sortie immédiate.'}
+                </div>
+              </div>
+
+              <div className="menu-actions">
+                <button type="button" className={`pill ${canEnter ? '' : 'disabled'}`} onClick={enterSelected} disabled={!canEnter}>
+                  Entrer
+                </button>
+                <button type="button" className={`pill ghost ${canExit ? '' : 'disabled'}`} onClick={exitWorld} disabled={!canExit}>
+                  Sortir
+                </button>
+              </div>
+              <div className="menu-hint">Déplace ou replie le menu. Réseau plein écran.</div>
+            </>
+          )}
         </div>
 
         <div className="minimal-hints">
