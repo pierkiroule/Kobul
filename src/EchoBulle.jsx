@@ -415,6 +415,131 @@ function registerComponents() {
       }
     },
   });
+
+  window.AFRAME.registerComponent('drone-controls', {
+    schema: {
+      camera: { type: 'selector' },
+      baseSpeed: { default: 1.8 },
+      speedMultiplier: { default: 1 },
+      enabled: { default: true },
+    },
+    init() {
+      this.direction = new window.AFRAME.THREE.Vector3();
+      this.worldDirection = new window.AFRAME.THREE.Vector3();
+      this.quaternion = new window.AFRAME.THREE.Quaternion();
+      this.state = {
+        forward: false,
+        backward: false,
+        left: false,
+        right: false,
+        up: false,
+        down: false,
+      };
+
+      this.onKeyDown = this.onKeyDown.bind(this);
+      this.onKeyUp = this.onKeyUp.bind(this);
+      this.onCommand = this.onCommand.bind(this);
+      window.addEventListener('keydown', this.onKeyDown);
+      window.addEventListener('keyup', this.onKeyUp);
+      this.el.addEventListener('drone-command', this.onCommand);
+    },
+    remove() {
+      window.removeEventListener('keydown', this.onKeyDown);
+      window.removeEventListener('keyup', this.onKeyUp);
+      this.el.removeEventListener('drone-command', this.onCommand);
+    },
+    isTyping() {
+      const active = document.activeElement;
+      if (!active) return false;
+      const tag = active.tagName;
+      return tag === 'INPUT' || tag === 'TEXTAREA' || active.isContentEditable;
+    },
+    onKeyDown(e) {
+      if (!this.data.enabled || this.isTyping()) return;
+      const key = e.key.toLowerCase();
+      switch (key) {
+        case 'arrowup':
+        case 'w':
+          this.state.forward = true;
+          break;
+        case 'arrowdown':
+        case 's':
+          this.state.backward = true;
+          break;
+        case 'arrowleft':
+        case 'a':
+          this.state.left = true;
+          break;
+        case 'arrowright':
+        case 'd':
+          this.state.right = true;
+          break;
+        case 'q':
+        case 'pageup':
+          this.state.up = true;
+          break;
+        case 'e':
+        case 'pagedown':
+          this.state.down = true;
+          break;
+        default:
+          break;
+      }
+    },
+    onKeyUp(e) {
+      const key = e.key.toLowerCase();
+      switch (key) {
+        case 'arrowup':
+        case 'w':
+          this.state.forward = false;
+          break;
+        case 'arrowdown':
+        case 's':
+          this.state.backward = false;
+          break;
+        case 'arrowleft':
+        case 'a':
+          this.state.left = false;
+          break;
+        case 'arrowright':
+        case 'd':
+          this.state.right = false;
+          break;
+        case 'q':
+        case 'pageup':
+          this.state.up = false;
+          break;
+        case 'e':
+        case 'pagedown':
+          this.state.down = false;
+          break;
+        default:
+          break;
+      }
+    },
+    onCommand(e) {
+      const { axis, active } = e.detail || {};
+      if (!axis || typeof active !== 'boolean') return;
+      this.state[axis] = active;
+    },
+    tick(time, dt) {
+      if (!this.data.enabled) return;
+      const delta = Math.min(dt / 1000, 0.08);
+      this.direction.set(
+        (this.state.right ? 1 : 0) - (this.state.left ? 1 : 0),
+        (this.state.up ? 1 : 0) - (this.state.down ? 1 : 0),
+        (this.state.backward ? 1 : 0) - (this.state.forward ? 1 : 0),
+      );
+
+      if (this.direction.lengthSq() === 0) return;
+
+      const cameraObj = this.data.camera?.object3D || this.el.object3D;
+      this.direction.normalize();
+      this.worldDirection.copy(this.direction).applyQuaternion(cameraObj.getWorldQuaternion(this.quaternion));
+      const magnitude = this.data.baseSpeed * (this.data.speedMultiplier || 1) * delta;
+      this.el.object3D.position.addScaledVector(this.worldDirection, magnitude);
+    },
+  });
 }
 
 function collectLinks() {
@@ -437,6 +562,7 @@ export default function EchoBulle() {
   const ready = useAframe();
   const mountRef = useRef(null);
   const sceneRef = useRef(null);
+  const cameraRigRef = useRef(null);
   const sculptureRef = useRef(null);
   const worldContainerRef = useRef(null);
   const bubbleRefs = useRef(new Map());
@@ -444,6 +570,7 @@ export default function EchoBulle() {
   const [viewMode, setViewMode] = useState('2d');
   const [selected, setSelected] = useState(null);
   const [xrSupported, setXrSupported] = useState(false);
+  const [speedMultiplier, setSpeedMultiplier] = useState(1);
   const hoverRef = useRef(null);
   const actionsRef = useRef({ enter: null, exit: null, select: null });
   const inputLockedRef = useRef(false);
@@ -477,6 +604,10 @@ export default function EchoBulle() {
     x: 16,
     y: (typeof window !== 'undefined' ? window.innerHeight : 760) - 190,
   }));
+  const navPanel = useDraggablePanel(() => ({
+    x: (typeof window !== 'undefined' ? window.innerWidth : 760) - 210,
+    y: (typeof window !== 'undefined' ? window.innerHeight : 760) - 230,
+  }));
 
   useEffect(() => {
     if (!ready) return;
@@ -502,6 +633,16 @@ export default function EchoBulle() {
       sceneRef.current.exitVR?.();
     }
   }, [viewMode]);
+
+  useEffect(() => {
+    if (!cameraRigRef.current) return;
+    cameraRigRef.current.setAttribute('drone-controls', 'enabled', viewMode !== '2d');
+  }, [viewMode]);
+
+  useEffect(() => {
+    if (!cameraRigRef.current) return;
+    cameraRigRef.current.setAttribute('drone-controls', 'speedMultiplier', speedMultiplier);
+  }, [speedMultiplier]);
 
   useEffect(() => {
     if (!ready || !mountRef.current) return;
@@ -535,7 +676,7 @@ export default function EchoBulle() {
     camera.id = 'camera';
     camera.setAttribute('camera', 'active: true');
     camera.setAttribute('look-controls', 'pointerLockEnabled: false');
-    camera.setAttribute('wasd-controls', 'acceleration: 8');
+    cameraRig.setAttribute('drone-controls', 'camera: #camera; baseSpeed: 2; speedMultiplier: 1');
     const cursor = document.createElement('a-entity');
     cursor.setAttribute('cursor', 'fuse: true; fuseTimeout: 1200');
     cursor.setAttribute('raycaster', 'objects: .selectable');
@@ -732,6 +873,7 @@ export default function EchoBulle() {
     scene.addEventListener('exit-vr', handleExitVr);
 
     sceneRef.current = scene;
+    cameraRigRef.current = cameraRig;
     sculptureRef.current = sculpture;
     worldContainerRef.current = worldContainer;
     mountRef.current.appendChild(scene);
@@ -749,10 +891,27 @@ export default function EchoBulle() {
       mountRef.current?.removeChild(scene);
       bubbleRefs.current.clear();
       sceneRef.current = null;
+      cameraRigRef.current = null;
       sculptureRef.current = null;
       worldContainerRef.current = null;
     };
   }, [ready]);
+
+  const sendDroneCommand = (axis, active) => {
+    cameraRigRef.current?.emit('drone-command', { axis, active }, false);
+  };
+
+  const pressDirection = (axis) => (e) => {
+    e.preventDefault();
+    sendDroneCommand(axis, true);
+  };
+
+  const releaseDirection = (axis) => () => sendDroneCommand(axis, false);
+
+  useEffect(() => {
+    if (viewMode !== '2d') return;
+    ['forward', 'backward', 'left', 'right', 'up', 'down'].forEach((axis) => sendDroneCommand(axis, false));
+  }, [viewMode]);
 
   const enterSelected = () => {
     if (!selected || !worldPresets[selected] || inputLockedRef.current) return;
@@ -1015,6 +1174,112 @@ export default function EchoBulle() {
             </div>
           </div>
         </div>
+
+        {viewMode !== '2d' && (
+          <div
+            className="floating-panel nav-pad"
+            ref={navPanel.ref}
+            style={{ left: navPanel.position.x, top: navPanel.position.y }}
+          >
+            <div className="panel-handle" onPointerDown={navPanel.startDrag} aria-label="Déplacer le pad de vol" />
+            <div className="nav-pad__content" role="group" aria-label="Navigation flottante">
+              <div className="nav-pad__grid">
+                <div className="nav-pad__row">
+                  <span />
+                  <button
+                    type="button"
+                    className="nav-btn"
+                    aria-label="Avancer"
+                    onPointerDown={pressDirection('forward')}
+                    onPointerUp={releaseDirection('forward')}
+                    onPointerLeave={releaseDirection('forward')}
+                    onPointerCancel={releaseDirection('forward')}
+                  >
+                    ↑
+                  </button>
+                  <span />
+                </div>
+                <div className="nav-pad__row">
+                  <button
+                    type="button"
+                    className="nav-btn"
+                    aria-label="Glisser vers la gauche"
+                    onPointerDown={pressDirection('left')}
+                    onPointerUp={releaseDirection('left')}
+                    onPointerLeave={releaseDirection('left')}
+                    onPointerCancel={releaseDirection('left')}
+                  >
+                    ←
+                  </button>
+                  <span className="nav-pad__origin" aria-hidden="true">•</span>
+                  <button
+                    type="button"
+                    className="nav-btn"
+                    aria-label="Glisser vers la droite"
+                    onPointerDown={pressDirection('right')}
+                    onPointerUp={releaseDirection('right')}
+                    onPointerLeave={releaseDirection('right')}
+                    onPointerCancel={releaseDirection('right')}
+                  >
+                    →
+                  </button>
+                </div>
+                <div className="nav-pad__row">
+                  <span />
+                  <button
+                    type="button"
+                    className="nav-btn"
+                    aria-label="Reculer"
+                    onPointerDown={pressDirection('backward')}
+                    onPointerUp={releaseDirection('backward')}
+                    onPointerLeave={releaseDirection('backward')}
+                    onPointerCancel={releaseDirection('backward')}
+                  >
+                    ↓
+                  </button>
+                  <span />
+                </div>
+              </div>
+              <div className="nav-pad__vertical" aria-label="Altitude libre">
+                <button
+                  type="button"
+                  className="nav-btn"
+                  onPointerDown={pressDirection('up')}
+                  onPointerUp={releaseDirection('up')}
+                  onPointerLeave={releaseDirection('up')}
+                  onPointerCancel={releaseDirection('up')}
+                >
+                  ⤒
+                </button>
+                <button
+                  type="button"
+                  className="nav-btn"
+                  onPointerDown={pressDirection('down')}
+                  onPointerUp={releaseDirection('down')}
+                  onPointerLeave={releaseDirection('down')}
+                  onPointerCancel={releaseDirection('down')}
+                >
+                  ⤓
+                </button>
+              </div>
+            </div>
+
+            <label className="nav-speed" htmlFor="speed-slider">
+              Vitesse
+              <span className="nav-speed__value">{speedMultiplier.toFixed(1)}x</span>
+              <input
+                id="speed-slider"
+                type="range"
+                min="0.6"
+                max="2.4"
+                step="0.1"
+                value={speedMultiplier}
+                onChange={(e) => setSpeedMultiplier(parseFloat(e.target.value))}
+              />
+            </label>
+            <p className="nav-hint">Pad, flèches ou ZQSD pour voler parmi les bulles.</p>
+          </div>
+        )}
       </div>
     </div>
   );
