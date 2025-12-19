@@ -10,6 +10,10 @@ EchoBulle est une exploration immersive légère : un réseau de bulles métapho
    - Casque VR : Oculus Browser / Meta Quest, navigateur WebXR.
 3. Aucun build ni serveur n'est requis. Un simple double-clic suffit ; si votre navigateur bloque les ressources locales, servez le dossier avec un `python -m http.server 8000` minimal.
 
+### Déploiement Vercel
+- Le dépôt inclut `vercel.json` pour forcer un déploiement 100% statique (pas de commande `vite build`).
+- Vercel doit simplement servir `index.html`, `js/` et `assets/` tels quels ; aucune étape de build n'est attendue.
+
 ## Gestes et interactions
 ### Mode A — Exploration libre (par défaut)
 - **Mobile** : glisser pour regarder autour, pincer pour zoomer (comportement natif A-Frame), tap/clic court sur une bulle pour la mettre en surbrillance.
