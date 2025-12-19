@@ -66,20 +66,38 @@ body {
   bottom: 14px;
   right: 14px;
   display: flex;
-  gap: 10px;
+  gap: 12px;
   align-items: center;
+  flex-wrap: wrap;
   pointer-events: auto;
   background: rgba(6, 12, 20, 0.7);
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 12px;
-  padding: 10px 12px;
+  padding: 12px 14px;
   backdrop-filter: blur(10px);
 }
 
-.action-hint {
-  font-size: 13px;
-  color: rgba(233, 242, 255, 0.82);
-  opacity: 0.86;
+.action-info {
+  min-width: 180px;
+}
+
+.action-title {
+  margin: 0;
+  font-size: 14px;
+  letter-spacing: 0.01em;
+  color: rgba(233, 242, 255, 0.95);
+}
+
+.action-meta {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: rgba(233, 242, 255, 0.7);
+}
+
+.action-buttons {
+  display: flex;
+  gap: 10px;
+  align-items: center;
 }
 
 .chip {
@@ -121,6 +139,11 @@ body {
 .pill.ghost {
   background: rgba(233, 242, 255, 0.05);
   border-color: rgba(233, 242, 255, 0.18);
+}
+
+.pill.active-light {
+  border-color: rgba(127, 206, 255, 0.5);
+  background: rgba(127, 206, 255, 0.12);
 }
 
 .pill.disabled,

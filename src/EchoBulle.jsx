@@ -30,6 +30,11 @@ const palette = {
 };
 
 const worldPresets = {
+  root: {
+    sky: '#0c1a24',
+    fog: 'color: #0c1a24; density: 0.02',
+    fx: { color: '#9bd7ff', radius: 6.2, count: 34, drift: 0.16 },
+  },
   flow: {
     sky: '#0a1d30',
     fog: 'color: #0a1d30; density: 0.022',
@@ -44,6 +49,26 @@ const worldPresets = {
     sky: '#0b1b21',
     fog: 'color: #0b1b21; density: 0.02',
     fx: { color: '#b6e8ff', radius: 7.4, count: 42, drift: 0.2 },
+  },
+  echo: {
+    sky: '#0d1426',
+    fog: 'color: #0d1426; density: 0.026',
+    fx: { color: '#cbb5ff', radius: 5.6, count: 32, drift: 0.16 },
+  },
+  vein: {
+    sky: '#0b161c',
+    fog: 'color: #0b161c; density: 0.024',
+    fx: { color: '#a1ffe9', radius: 5.2, count: 30, drift: 0.15 },
+  },
+  moss: {
+    sky: '#0c1610',
+    fog: 'color: #0c1610; density: 0.024',
+    fx: { color: '#a7ffb3', radius: 5.4, count: 28, drift: 0.12 },
+  },
+  pulse: {
+    sky: '#0c1224',
+    fog: 'color: #0c1224; density: 0.024',
+    fx: { color: '#f5b7ff', radius: 6.4, count: 36, drift: 0.22 },
   },
 };
 
@@ -545,9 +570,13 @@ export default function EchoBulle() {
 
     const selectBubble = (id) => {
       if (inputLockedRef.current) return;
+      const alreadySelected = selectedRef.current === id;
       selectedRef.current = id;
       setSelected(id);
       updateSculptureVisuals();
+      if (alreadySelected && worldPresets[id] && spaceModeRef.current === 'reseau') {
+        showWorld(id);
+      }
     };
 
     const setSpaceValue = (nextMode) => {
@@ -617,7 +646,7 @@ export default function EchoBulle() {
     worldContainerRef.current = worldContainer;
     mountRef.current.appendChild(scene);
 
-    selectBubble('root');
+    selectBubble('flow');
     updateSculptureVisuals();
 
     return () => {
@@ -758,6 +787,21 @@ export default function EchoBulle() {
 
   useEffect(() => () => releaseMapListeners(), []);
 
+  useEffect(() => {
+    const handleKey = (e) => {
+      if (e.key !== 'Enter' && e.key !== ' ') return;
+      if (spaceMode === 'reseau') {
+        e.preventDefault();
+        enterSelected();
+      } else if (spaceMode === 'bulle') {
+        e.preventDefault();
+        exitWorld();
+      }
+    };
+    window.addEventListener('keydown', handleKey);
+    return () => window.removeEventListener('keydown', handleKey);
+  }, [spaceMode, enterSelected, exitWorld]);
+
   if (!ready) {
     return <div style={{ padding: '24px', color: 'rgba(227,241,255,0.7)' }}>Chargement de l’espace…</div>;
   }
@@ -765,6 +809,12 @@ export default function EchoBulle() {
   const canEnter = selected && worldPresets[selected] && spaceMode === 'reseau' && !inputLockedRef.current;
   const canExit = spaceMode === 'bulle';
   const sceneVisible = viewMode !== '2d' || spaceMode === 'bulle';
+  const selectedBubble = bubbles.find((b) => b.id === selected);
+  const selectionMeta = spaceMode === 'bulle'
+    ? 'Immersion ouverte · bouton ou Entrée pour revenir'
+    : worldPresets[selected]
+      ? 'Prêt à traverser · double tap / Entrée / manette'
+      : 'Choisis une bulle habitée pour entrer';
 
   return (
     <div id="aframe-shell" className="immersive-shell">
@@ -830,24 +880,31 @@ export default function EchoBulle() {
         </div>
 
         <div className="action-dock">
-          {viewMode === '2d' ? (
-            spaceMode === 'bulle' ? (
+          <div className="action-info">
+            <div className="action-title">{selectedBubble?.title ?? 'Choisis une bulle'}</div>
+            <div className="action-meta">{selectionMeta}</div>
+          </div>
+          <div className="action-buttons">
+            {spaceMode === 'bulle' ? (
               <button type="button" className="pill" onClick={exitWorld} disabled={!canExit}>
                 Retour réseau
               </button>
             ) : (
-              <div className="action-hint">Mode 2D : tap pour ouvrir une bulle, pinch pour zoomer</div>
-            )
-          ) : (
-            <>
-              <button type="button" className={`pill ${canEnter ? '' : 'disabled'}`} onClick={enterSelected} disabled={!canEnter}>
-                Entrer
-              </button>
-              <button type="button" className={`pill ghost ${canExit ? '' : 'disabled'}`} onClick={exitWorld} disabled={!canExit}>
-                Sortir
-              </button>
-            </>
-          )}
+              <>
+                <button type="button" className={`pill ${canEnter ? '' : 'disabled'}`} onClick={enterSelected} disabled={!canEnter}>
+                  Entrer dans la bulle
+                </button>
+                <button
+                  type="button"
+                  className={viewMode === '2d' ? 'pill ghost active-light' : 'pill ghost'}
+                  onClick={switchTo3d}
+                  disabled={viewMode === '3d'}
+                >
+                  Vue spatiale
+                </button>
+              </>
+            )}
+          </div>
         </div>
       </div>
     </div>
