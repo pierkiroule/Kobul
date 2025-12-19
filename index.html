@@ -1,53 +1,12 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="fr">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Kobul — EchoBulle</title>
-  <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap">
-  <style>
-    body { margin: 0; font-family: "Inter", system-ui, -apple-system, sans-serif; }
-    #vr-notice {
-      position: fixed;
-      top: 12px;
-      right: 12px;
-      background: rgba(0,0,0,0.6);
-      color: #dfe7ff;
-      padding: 10px 14px;
-      border-radius: 10px;
-      max-width: 320px;
-      font-size: 14px;
-      line-height: 1.5;
-      z-index: 2;
-    }
-  </style>
-</head>
-<body>
-  <div id="vr-notice">
-    Mode A (exploration): toucher / clic pour sélectionner, glisser pour bouger. Mode B (fractal): maintien long ou regard prolongé pour entrer, clic sur le fond pour sortir.
-  </div>
-
-  <a-scene renderer="colorManagement: true" background="color: #0c0f1a">
-    <a-assets></a-assets>
-
-    <a-entity id="cameraRig" position="0 1.6 5">
-      <a-entity id="player-camera" camera look-controls wasd-controls
-                cursor="rayOrigin: mouse; fuse: true; fuseTimeout: 1200"
-                position="0 0 0"></a-entity>
-    </a-entity>
-
-    <a-entity light="type: ambient; color: #dbeafe; intensity: 0.7"></a-entity>
-    <a-entity light="type: directional; color: #bcd1ff; intensity: 0.9" position="1 2 1"></a-entity>
-
-    <a-entity id="bubble-group"></a-entity>
-    <a-entity id="link-group"></a-entity>
-
-    <a-entity id="background-sky" geometry="primitive: sphere; radius: 50" material="color: #0c0f1a; side: back" position="0 0 0"></a-entity>
-  </a-scene>
-
-  <script src="js/data.js"></script>
-  <script src="js/components.js"></script>
-  <script src="js/app.js"></script>
-</body>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Kobul — EchoBulle</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
 </html>
