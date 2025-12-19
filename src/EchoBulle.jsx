@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { bubbles } from './data.js';
-import { startAmbient } from './audio.js';
+import { startAmbient, getAudioLevel } from './audio.js';
 
 const AFRAME_CDN = 'https://aframe.io/releases/1.5.0/aframe.min.js';
 
@@ -540,6 +540,131 @@ function registerComponents() {
       this.el.object3D.position.addScaledVector(this.worldDirection, magnitude);
     },
   });
+
+  window.AFRAME.registerComponent('audio-react-glow', {
+    schema: { min: { default: 0.94 }, boost: { default: 0.4 } },
+    tick() {
+      const level = getAudioLevel();
+      const intensity = this.data.min + level * this.data.boost;
+      const obj = this.el.object3D;
+      obj.scale.set(intensity, intensity, intensity);
+      const mesh = this.el.getObject3D('mesh');
+      if (mesh?.material) {
+        const mat = mesh.material;
+        const emissive = 0.2 + level * 1.2;
+        if (Array.isArray(mat)) mat.forEach((m) => (m.emissiveIntensity = emissive));
+        else mat.emissiveIntensity = emissive;
+      }
+    },
+  });
+
+  window.AFRAME.registerComponent('audio-reactive-sculpture', {
+    init() {
+      this.links = [];
+      this.nodes = [];
+      this.t = Math.random() * Math.PI * 2;
+    },
+    refreshRefs() {
+      if (this.links.length || this.nodes.length) return;
+      this.links = Array.from(this.el.children || []).filter((child) => child.dataset?.link);
+      this.nodes = Array.from(this.el.children || []).filter((child) => !child.dataset?.link);
+    },
+    tick(time, dt) {
+      this.refreshRefs();
+      const level = getAudioLevel();
+      const delta = (dt || 16) / 1000;
+      this.t += delta * 0.5 + level * 0.8 * delta;
+      const yFloat = Math.sin(this.t) * 0.06 + level * 0.2;
+      const rotSpeed = 0.16 * delta + level * 0.4 * delta;
+      this.el.object3D.position.y = yFloat;
+      this.el.object3D.rotation.y += rotSpeed;
+
+      const opacity = 0.22 + level * 0.4;
+      this.links.forEach((link, idx) => {
+        link.setAttribute('material', 'opacity', opacity + Math.sin(this.t + idx * 0.4) * 0.08);
+      });
+      this.nodes.forEach((node, idx) => {
+        node.object3D.rotation.y += (0.06 + level * 0.2) * delta;
+        if (idx % 2 === 0) {
+          node.object3D.rotation.x += 0.04 * delta;
+        }
+      });
+    },
+  });
+
+  window.AFRAME.registerComponent('halo-ribbon', {
+    schema: { radius: { default: 2.2 }, color: { default: '#7dc7ff' }, twist: { default: 0.18 } },
+    init() {
+      const THREE = window.AFRAME.THREE;
+      const points = [];
+      for (let i = 0; i <= 40; i += 1) {
+        const theta = (i / 40) * Math.PI * 2;
+        const r = this.data.radius + Math.sin(theta * 3) * 0.15;
+        points.push(new THREE.Vector3(Math.cos(theta) * r, Math.sin(theta * 2) * 0.22, Math.sin(theta) * r));
+      }
+      const curve = new THREE.CatmullRomCurve3(points, true);
+      const geometry = new THREE.TubeGeometry(curve, 320, 0.045, 12, true);
+      const material = new THREE.MeshStandardMaterial({
+        color: this.data.color,
+        roughness: 0.25,
+        metalness: 0.18,
+        emissive: this.data.color,
+        emissiveIntensity: 0.26,
+        transparent: true,
+        opacity: 0.45,
+      });
+      this.mesh = new THREE.Mesh(geometry, material);
+      this.el.setObject3D('mesh', this.mesh);
+    },
+    tick(time, dt) {
+      if (!this.mesh) return;
+      const level = getAudioLevel();
+      const delta = (dt || 16) / 1000;
+      this.mesh.rotation.y += (0.12 + level * 0.6) * delta;
+      this.mesh.rotation.x = Math.sin(time / 4000) * this.data.twist;
+    },
+  });
+
+  window.AFRAME.registerComponent('orbiting-fragments', {
+    schema: { count: { default: 18 }, radius: { default: 2.2 }, color: { default: '#cbb5ff' } },
+    init() {
+      const THREE = window.AFRAME.THREE;
+      this.fragments = [];
+      const material = new THREE.MeshStandardMaterial({
+        color: this.data.color,
+        roughness: 0.36,
+        metalness: 0.22,
+        emissive: this.data.color,
+        emissiveIntensity: 0.32,
+        flatShading: true,
+        transparent: true,
+        opacity: 0.68,
+      });
+      for (let i = 0; i < this.data.count; i += 1) {
+        const geom = new THREE.TetrahedronGeometry(0.08 + Math.random() * 0.08);
+        const mesh = new THREE.Mesh(geom, material.clone());
+        mesh.userData = {
+          angle: Math.random() * Math.PI * 2,
+          speed: 0.2 + Math.random() * 0.4,
+          height: (Math.random() - 0.5) * 0.8,
+        };
+        this.fragments.push(mesh);
+        this.el.object3D.add(mesh);
+      }
+    },
+    tick(time, dt) {
+      const delta = (dt || 16) / 1000;
+      const level = getAudioLevel();
+      this.fragments.forEach((mesh, i) => {
+        const { angle, speed, height } = mesh.userData;
+        const theta = angle + time / 3000 + level * 1.6;
+        const radius = this.data.radius + Math.sin(theta * 2 + i) * 0.12;
+        mesh.position.set(Math.cos(theta) * radius, height + Math.sin(theta + i) * 0.2, Math.sin(theta) * radius);
+        mesh.rotation.x += (0.6 + level * 2) * delta;
+        mesh.rotation.y += (0.4 + speed * 0.6) * delta;
+      });
+    },
+  });
 }
 
 function collectLinks() {
@@ -692,6 +817,7 @@ export default function EchoBulle() {
     sculpture.id = 'sculpture';
     sculpture.setAttribute('position', '0 0 0');
     sculpture.setAttribute('sculpture-controls', '');
+    sculpture.setAttribute('audio-reactive-sculpture', '');
 
     links.forEach(({ a, b }) => {
       const from = bubbles.find((n) => n.id === a);
@@ -701,6 +827,7 @@ export default function EchoBulle() {
       link.dataset.link = `${a}::${b}`;
       link.setAttribute('line', `start: ${from.position.x} ${from.position.y} ${from.position.z}; end: ${to.position.x} ${to.position.y} ${to.position.z}; color: ${palette.link}`);
       link.setAttribute('material', 'opacity: 0.32');
+      link.setAttribute('audio-react-glow', 'min: 1; boost: 0.2');
       sculpture.appendChild(link);
     });
 
@@ -717,6 +844,7 @@ export default function EchoBulle() {
       sphere.setAttribute('portal-node', `id: ${id}`);
       sphere.setAttribute('soft-pulse', 'base: 1; boost: 0.05');
       sphere.setAttribute('material', `roughness: 0.32; metalness: 0.04; opacity: 0.72; transparent: true; emissive: ${palette.halo}; emissiveIntensity: 0.22`);
+      sphere.setAttribute('audio-react-glow', 'min: 0.96; boost: 0.26');
 
       const label = document.createElement('a-entity');
       label.setAttribute('position', '0 -0.52 0');
@@ -750,6 +878,27 @@ export default function EchoBulle() {
 
       const fx = document.createElement('a-entity');
       fx.setAttribute('firefly-field', `count: ${config.fx.count}; radius: ${config.fx.radius}; color: ${config.fx.color}; drift: ${config.fx.drift}`);
+      fx.setAttribute('audio-react-glow', 'min: 1; boost: 0.4');
+
+      const membrane = document.createElement('a-entity');
+      membrane.setAttribute('geometry', 'primitive: sphere; radius: 3.4; segmentsWidth: 24; segmentsHeight: 18');
+      membrane.setAttribute('material', `color: ${config.fx.color}; wireframe: true; opacity: 0.14; transparent: true; side: double`);
+      membrane.setAttribute('audio-react-glow', 'min: 0.96; boost: 0.5');
+
+      const ribbon = document.createElement('a-entity');
+      ribbon.setAttribute('position', '0 1.4 -2.4');
+      ribbon.setAttribute('halo-ribbon', `radius: ${config.fx.radius * 0.35}; color: ${config.fx.color}`);
+
+      const fragments = document.createElement('a-entity');
+      fragments.setAttribute('orbiting-fragments', `count: 22; radius: ${config.fx.radius * 0.25}; color: ${config.fx.color}`);
+
+      const groundRing = document.createElement('a-entity');
+      groundRing.setAttribute('geometry', 'primitive: ring; radiusInner: 2.3; radiusOuter: 3.4; segmentsTheta: 96');
+      groundRing.setAttribute('rotation', '-90 0 0');
+      groundRing.setAttribute('position', '0 0.18 -2.6');
+      groundRing.setAttribute('material', `color: ${config.fx.color}; opacity: 0.18; roughness: 0.4; metalness: 0.16; side: double`);
+      groundRing.setAttribute('soft-pulse', 'base: 1; boost: 0.08');
+      groundRing.setAttribute('audio-react-glow', 'min: 1; boost: 0.3');
 
       const videoGroup = document.createElement('a-entity');
       const cubePositions = [
@@ -774,6 +923,10 @@ export default function EchoBulle() {
       world.appendChild(sky);
       world.appendChild(fogShell);
       world.appendChild(fx);
+      world.appendChild(membrane);
+      world.appendChild(ribbon);
+      world.appendChild(fragments);
+      world.appendChild(groundRing);
       world.appendChild(videoGroup);
       worldContainer.appendChild(world);
     });
