@@ -1,5 +1,5 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { bubbles, relatedIds } from './data.js';
+import React, { useEffect, useRef, useState } from 'react';
+import { bubbles } from './data.js';
 import { startAmbient } from './audio.js';
 
 const AFRAME_CDN = 'https://aframe.io/releases/1.5.0/aframe.min.js';
@@ -20,6 +20,37 @@ function useAframe() {
 
   return ready;
 }
+
+const palette = {
+  base: '#0b131d',
+  ink: '#e3f1ff',
+  halo: '#7dc7ff',
+  low: '#0a0f18',
+  link: '#6286a8',
+};
+
+const worldPresets = {
+  flow: {
+    sky: '#0a1d30',
+    fog: 'color: #0a1d30; density: 0.022',
+    fx: { color: '#8dd2ff', radius: 6, count: 36, drift: 0.18 },
+  },
+  hollow: {
+    sky: '#0c1018',
+    fog: 'color: #0c1018; density: 0.028',
+    fx: { color: '#c4ffc8', radius: 5.4, count: 30, drift: 0.14 },
+  },
+  tide: {
+    sky: '#0b1b21',
+    fog: 'color: #0b1b21; density: 0.02',
+    fx: { color: '#b6e8ff', radius: 7.4, count: 42, drift: 0.2 },
+  },
+};
+
+const videoSources = [
+  { id: 'kobul-video-1', src: 'https://cdn.aframe.io/videos/360-video/Chamonix/Chamonix_1.mp4' },
+  { id: 'kobul-video-2', src: 'https://cdn.aframe.io/videos/bunny.mp4' },
+];
 
 function registerComponents() {
   if (!window.AFRAME || window.AFRAME.components['gentle-float']) return;
@@ -46,35 +77,6 @@ function registerComponents() {
     },
   });
 
-  window.AFRAME.registerComponent('soft-select', {
-    schema: { id: { type: 'string' } },
-    init() {
-      const el = this.el;
-      const scene = el.sceneEl;
-      el.classList.add('selectable');
-
-      const hoverIn = () => scene?.emit('bubble-hover', { id: this.data.id });
-      const hoverOut = () => scene?.emit('bubble-hover', { id: null });
-      const select = () => {
-        scene?.emit('bubble-select', { id: this.data.id });
-        startAmbient();
-      };
-
-      el.addEventListener('mouseenter', hoverIn);
-      el.addEventListener('mouseleave', hoverOut);
-      el.addEventListener('click', select);
-
-      this.cleanup = () => {
-        el.removeEventListener('mouseenter', hoverIn);
-        el.removeEventListener('mouseleave', hoverOut);
-        el.removeEventListener('click', select);
-      };
-    },
-    remove() {
-      this.cleanup?.();
-    },
-  });
-
   window.AFRAME.registerComponent('soft-pulse', {
     schema: { base: { default: 1 }, boost: { default: 0.08 } },
     tick(time) {
@@ -83,13 +85,224 @@ function registerComponents() {
     },
   });
 
-  window.AFRAME.registerComponent('backdrop-exit', {
+  window.AFRAME.registerComponent('firefly-field', {
+    schema: {
+      count: { default: 36 },
+      radius: { default: 6 },
+      color: { default: '#8dd2ff' },
+      drift: { default: 0.18 },
+    },
     init() {
+      this.nodes = [];
+      for (let i = 0; i < this.data.count; i += 1) {
+        const r = Math.random() * this.data.radius * 0.8 + this.data.radius * 0.2;
+        const theta = Math.random() * Math.PI * 2;
+        const phi = Math.random() * Math.PI;
+        const x = r * Math.sin(phi) * Math.cos(theta);
+        const y = r * Math.cos(phi);
+        const z = r * Math.sin(phi) * Math.sin(theta);
+
+        const node = document.createElement('a-sphere');
+        node.setAttribute('radius', 0.06 + Math.random() * 0.05);
+        node.setAttribute('color', this.data.color);
+        node.setAttribute(
+          'material',
+          `opacity: 0.32; transparent: true; emissive: ${this.data.color}; emissiveIntensity: 0.28; roughness: 0.1; metalness: 0`
+        );
+        node.setAttribute('position', `${x} ${y} ${z}`);
+
+        this.nodes.push({
+          el: node,
+          pos: { x, y, z },
+          vel: {
+            x: (Math.random() - 0.5) * 0.03,
+            y: (Math.random() - 0.5) * 0.02,
+            z: (Math.random() - 0.5) * 0.03,
+          },
+          phase: Math.random() * Math.PI * 2,
+        });
+
+        this.el.appendChild(node);
+      }
+    },
+    tick(time, dt) {
+      const delta = Math.min(dt || 16, 40) / 1000;
+      const maxSpeed = 0.18;
+      this.nodes.forEach((node) => {
+        const ax = (Math.random() - 0.5) * this.data.drift * 0.008;
+        const ay = (Math.random() - 0.5) * this.data.drift * 0.006;
+        const az = (Math.random() - 0.5) * this.data.drift * 0.008;
+
+        node.vel.x = (node.vel.x + ax) * 0.96;
+        node.vel.y = (node.vel.y + ay) * 0.96;
+        node.vel.z = (node.vel.z + az) * 0.96;
+
+        const speed = Math.hypot(node.vel.x, node.vel.y, node.vel.z);
+        if (speed > maxSpeed) {
+          const scale = maxSpeed / speed;
+          node.vel.x *= scale;
+          node.vel.y *= scale;
+          node.vel.z *= scale;
+        }
+
+        node.pos.x += node.vel.x * delta;
+        node.pos.y += node.vel.y * delta;
+        node.pos.z += node.vel.z * delta;
+
+        const dist = Math.hypot(node.pos.x, node.pos.y, node.pos.z);
+        if (dist > this.data.radius) {
+          const pull = this.data.radius / dist;
+          node.pos.x *= pull;
+          node.pos.y *= pull;
+          node.pos.z *= pull;
+          node.vel.x *= -0.4;
+          node.vel.y *= -0.4;
+          node.vel.z *= -0.4;
+        }
+
+        const glow = 0.9 + Math.sin(time / 1100 + node.phase) * 0.12;
+        node.el.object3D.scale.set(glow, glow, glow);
+        node.el.setAttribute('position', `${node.pos.x} ${node.pos.y} ${node.pos.z}`);
+      });
+    },
+  });
+
+  window.AFRAME.registerComponent('slow-spin', {
+    schema: { speed: { default: 0.02 } },
+    tick(time, dt) {
+      const rot = this.el.object3D.rotation;
+      rot.y += (this.data.speed * dt) / 1000;
+    },
+  });
+
+  window.AFRAME.registerComponent('portal-node', {
+    schema: { id: { type: 'string' } },
+    init() {
+      const { id } = this.data;
       const el = this.el;
       const scene = el.sceneEl;
-      const release = () => scene?.emit('backdrop-release');
-      el.addEventListener('click', release);
-      this.remove = () => el.removeEventListener('click', release);
+
+      const select = () => scene?.emit('bubble-selected', { id });
+      const down = (e) => scene?.emit('bubble-pointer', { id, type: 'down', pointerId: e.pointerId });
+      const up = (e) => scene?.emit('bubble-pointer', { id, type: 'up', pointerId: e.pointerId });
+
+      el.classList.add('selectable');
+      el.addEventListener('click', select);
+      el.addEventListener('pointerdown', down);
+      el.addEventListener('pointerup', up);
+      el.addEventListener('mouseenter', () => scene?.emit('bubble-hover', { id }));
+      el.addEventListener('mouseleave', () => scene?.emit('bubble-hover', { id: null }));
+
+      this.cleanup = () => {
+        el.removeEventListener('click', select);
+        el.removeEventListener('pointerdown', down);
+        el.removeEventListener('pointerup', up);
+      };
+    },
+    remove() {
+      this.cleanup?.();
+    },
+  });
+
+  window.AFRAME.registerComponent('sculpture-controls', {
+    schema: { enabled: { default: true } },
+    init() {
+      this.canvas = null;
+      this.touches = new Map();
+      this.startRot = { x: 0, y: 0 };
+      this.startScale = 1;
+      this.activePointers = new Set();
+      this.baseDist = null;
+      this.bubblePointers = new Set();
+
+      this.onPointerDown = this.onPointerDown.bind(this);
+      this.onPointerUp = this.onPointerUp.bind(this);
+      this.onPointerMove = this.onPointerMove.bind(this);
+      this.onWheel = this.onWheel.bind(this);
+      this.handleBubblePointer = this.handleBubblePointer.bind(this);
+
+      const scene = this.el.sceneEl;
+      const bindCanvas = () => {
+        if (this.canvas || !scene?.canvas) return;
+        this.canvas = scene.canvas;
+        this.canvas.addEventListener('pointerdown', this.onPointerDown);
+        window.addEventListener('pointerup', this.onPointerUp);
+        window.addEventListener('pointermove', this.onPointerMove);
+        this.canvas.addEventListener('wheel', this.onWheel, { passive: true });
+      };
+
+      this.el.addEventListener('loaded', bindCanvas);
+      bindCanvas();
+      scene?.addEventListener('bubble-pointer', this.handleBubblePointer);
+    },
+    update(oldData) {
+      if (oldData?.enabled !== this.data.enabled) {
+        this.activePointers.clear();
+        this.touches.clear();
+        this.baseDist = null;
+      }
+    },
+    remove() {
+      if (this.canvas) {
+        this.canvas.removeEventListener('pointerdown', this.onPointerDown);
+        this.canvas.removeEventListener('wheel', this.onWheel);
+      }
+      window.removeEventListener('pointerup', this.onPointerUp);
+      window.removeEventListener('pointermove', this.onPointerMove);
+      this.el.sceneEl?.removeEventListener('bubble-pointer', this.handleBubblePointer);
+    },
+    handleBubblePointer(e) {
+      const { pointerId, type } = e.detail || {};
+      if (!pointerId) return;
+      if (type === 'down') this.bubblePointers.add(pointerId);
+      if (type === 'up') this.bubblePointers.delete(pointerId);
+    },
+    onPointerDown(e) {
+      if (!this.data.enabled) return;
+      if (this.bubblePointers.has(e.pointerId)) return;
+      this.activePointers.add(e.pointerId);
+      this.touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      this.startRot = { ...this.el.object3D.rotation };
+      this.startScale = this.el.object3D.scale.x;
+      if (this.touches.size < 2) {
+        this.baseDist = null;
+      }
+    },
+    onPointerUp(e) {
+      this.activePointers.delete(e.pointerId);
+      this.touches.delete(e.pointerId);
+      this.bubblePointers.delete(e.pointerId);
+      if (this.touches.size < 2) {
+        this.baseDist = null;
+      }
+    },
+    onWheel(e) {
+      if (!this.data.enabled) return;
+      const scale = this.el.object3D.scale.x;
+      const next = Math.min(1.6, Math.max(0.55, scale + (e.deltaY > 0 ? -0.05 : 0.05)));
+      this.el.object3D.scale.set(next, next, next);
+    },
+    onPointerMove(e) {
+      if (!this.data.enabled) return;
+      if (!this.activePointers.has(e.pointerId)) return;
+      this.touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      const points = Array.from(this.touches.values());
+      if (points.length === 1) {
+        const dx = e.movementX * 0.25;
+        const dy = e.movementY * 0.22;
+        const rot = this.el.object3D.rotation;
+        rot.y += (dx * Math.PI) / 180;
+        rot.x += (dy * Math.PI) / 180;
+      } else if (points.length >= 2) {
+        const [a, b] = points;
+        const dist = Math.hypot(a.x - b.x, a.y - b.y);
+        if (!this.baseDist) {
+          this.baseDist = dist;
+          this.startScale = this.el.object3D.scale.x;
+        }
+        const factor = Math.min(1.6, Math.max(0.55, (dist / this.baseDist) * this.startScale));
+        this.el.object3D.scale.set(factor, factor, factor);
+      }
     },
   });
 }
@@ -110,19 +323,45 @@ function collectLinks() {
 
 const links = collectLinks();
 
-const palette = {
-  calm: '#7dc7ff',
-  glow: '#c5e6ff',
-  low: '#0b1927',
-  link: '#6ba6d1',
-  haze: '#0a0f18',
-};
-
 export default function EchoBulle() {
   const ready = useAframe();
+  const mountRef = useRef(null);
   const sceneRef = useRef(null);
-  const [focusId, setFocusId] = useState(null);
-  const [hoverId, setHoverId] = useState(null);
+  const sculptureRef = useRef(null);
+  const worldContainerRef = useRef(null);
+  const bubbleRefs = useRef(new Map());
+  const [spaceMode, setSpaceMode] = useState('reseau');
+  const [viewMode, setViewMode] = useState('2d');
+  const [selected, setSelected] = useState(null);
+  const [xrSupported, setXrSupported] = useState(false);
+  const hoverRef = useRef(null);
+  const actionsRef = useRef({ enter: null, exit: null, select: null });
+  const inputLockedRef = useRef(false);
+
+  const [mapNodes, setMapNodes] = useState(() => {
+    const xs = bubbles.map((b) => b.position.x);
+    const zs = bubbles.map((b) => b.position.z);
+    const minX = Math.min(...xs);
+    const maxX = Math.max(...xs);
+    const minZ = Math.min(...zs);
+    const maxZ = Math.max(...zs);
+    const spanX = maxX - minX || 1;
+    const spanZ = maxZ - minZ || 1;
+    return bubbles.map((b) => ({
+      id: b.id,
+      title: b.title,
+      level: b.level,
+      x: ((b.position.x - minX) / spanX) * 100,
+      y: ((b.position.z - minZ) / spanZ) * 100,
+      links: b.links,
+    }));
+  });
+  const [mapScale, setMapScale] = useState(1);
+  const mapScaleRef = useRef(1);
+  const mapRef = useRef(null);
+  const mapTouchesRef = useRef(new Map());
+  const mapDragRef = useRef({ id: null, pointerId: null, moved: false });
+  const pinchRef = useRef({ base: null, start: 1 });
 
   useEffect(() => {
     if (!ready) return;
@@ -130,130 +369,487 @@ export default function EchoBulle() {
   }, [ready]);
 
   useEffect(() => {
-    if (!ready || !sceneRef.current) return;
-    const scene = sceneRef.current;
-    const onSelect = (e) => setFocusId(e.detail.id);
-    const onHover = (e) => setHoverId(e.detail.id);
-    const onBackdrop = () => setFocusId(null);
+    if (!ready || !navigator?.xr?.isSessionSupported) return;
+    navigator.xr.isSessionSupported('immersive-vr').then((supported) => setXrSupported(supported));
+  }, [ready]);
 
-    scene.addEventListener('bubble-select', onSelect);
-    scene.addEventListener('bubble-hover', onHover);
-    scene.addEventListener('backdrop-release', onBackdrop);
+  useEffect(() => {
+    if (!sculptureRef.current) return;
+    const enabled = viewMode !== '2d' && spaceMode === 'reseau';
+    sculptureRef.current.setAttribute('sculpture-controls', `enabled: ${enabled}`);
+  }, [viewMode, spaceMode]);
+
+  useEffect(() => {
+    if (!sceneRef.current) return;
+    if (viewMode === 'vr') {
+      sceneRef.current.enterVR?.();
+    } else {
+      sceneRef.current.exitVR?.();
+    }
+  }, [viewMode]);
+
+  useEffect(() => {
+    if (!ready || !mountRef.current) return;
+
+    const scene = document.createElement('a-scene');
+    scene.setAttribute('background', `color: ${palette.base}`);
+    scene.setAttribute('renderer', 'colorManagement: true; antialias: true; foveationLevel: 2; xrCompatible: true');
+    scene.setAttribute('vr-mode-ui', 'enabled: true');
+    scene.setAttribute('webxr', 'optionalFeatures: local-floor, bounded-floor, hand-tracking, dom-overlay; overlayElement: #aframe-shell');
+
+    const assets = document.createElement('a-assets');
+    videoSources.forEach((video) => {
+      const videoEl = document.createElement('video');
+      videoEl.setAttribute('id', video.id);
+      videoEl.setAttribute('src', video.src);
+      videoEl.setAttribute('autoplay', 'true');
+      videoEl.setAttribute('loop', 'true');
+      videoEl.setAttribute('muted', 'true');
+      videoEl.setAttribute('playsinline', 'true');
+      videoEl.setAttribute('preload', 'auto');
+      videoEl.setAttribute('crossorigin', 'anonymous');
+      videoEl.autoplay = true;
+      assets.appendChild(videoEl);
+    });
+    scene.appendChild(assets);
+
+    const cameraRig = document.createElement('a-entity');
+    cameraRig.id = 'cameraRig';
+    cameraRig.setAttribute('position', '0 1.6 4.2');
+    const camera = document.createElement('a-entity');
+    camera.id = 'camera';
+    camera.setAttribute('camera', 'active: true');
+    camera.setAttribute('look-controls', 'pointerLockEnabled: false');
+    camera.setAttribute('wasd-controls', 'acceleration: 8');
+    const cursor = document.createElement('a-entity');
+    cursor.setAttribute('cursor', 'fuse: true; fuseTimeout: 1200');
+    cursor.setAttribute('raycaster', 'objects: .selectable');
+    cursor.setAttribute('position', '0 0 -0.9');
+    cursor.setAttribute('geometry', 'primitive: ring; radiusInner: 0.01; radiusOuter: 0.016');
+    cursor.setAttribute('material', `color: ${palette.halo}; opacity: 0.45`);
+    cursor.setAttribute('soft-pulse', 'base: 1; boost: 0.06');
+    camera.appendChild(cursor);
+    cameraRig.appendChild(camera);
+    scene.appendChild(cameraRig);
+
+    const sculpture = document.createElement('a-entity');
+    sculpture.id = 'sculpture';
+    sculpture.setAttribute('position', '0 0 0');
+    sculpture.setAttribute('sculpture-controls', '');
+
+    links.forEach(({ a, b }) => {
+      const from = bubbles.find((n) => n.id === a);
+      const to = bubbles.find((n) => n.id === b);
+      if (!from || !to) return;
+      const link = document.createElement('a-entity');
+      link.dataset.link = `${a}::${b}`;
+      link.setAttribute('line', `start: ${from.position.x} ${from.position.y} ${from.position.z}; end: ${to.position.x} ${to.position.y} ${to.position.z}; color: ${palette.link}`);
+      link.setAttribute('material', 'opacity: 0.32');
+      sculpture.appendChild(link);
+    });
+
+    bubbles.forEach((bubble) => {
+      const { id, title, level, position } = bubble;
+      const wrapper = document.createElement('a-entity');
+      wrapper.setAttribute('position', `${position.x} ${position.y} ${position.z}`);
+      wrapper.setAttribute('gentle-float', `amp: ${0.05 + level * 0.015}; speed: ${0.25 + level * 0.06}`);
+
+      const sphere = document.createElement('a-sphere');
+      sphere.className = 'selectable';
+      sphere.setAttribute('radius', '0.32');
+      sphere.setAttribute('color', palette.halo);
+      sphere.setAttribute('portal-node', `id: ${id}`);
+      sphere.setAttribute('soft-pulse', 'base: 1; boost: 0.05');
+      sphere.setAttribute('material', `roughness: 0.32; metalness: 0.04; opacity: 0.72; transparent: true; emissive: ${palette.halo}; emissiveIntensity: 0.22`);
+
+      const label = document.createElement('a-entity');
+      label.setAttribute('position', '0 -0.52 0');
+      label.setAttribute('face-camera', '');
+      label.setAttribute('text', `value: ${title}\nNiveau ${level}; align: center; color: ${palette.ink}; opacity: 0.8; width: 2`);
+
+      wrapper.appendChild(sphere);
+      wrapper.appendChild(label);
+      sculpture.appendChild(wrapper);
+
+      bubbleRefs.current.set(id, { wrapper, sphere, label, level });
+    });
+
+    const worldContainer = document.createElement('a-entity');
+    worldContainer.id = 'world-container';
+    worldContainer.setAttribute('visible', false);
+
+    Object.entries(worldPresets).forEach(([id, config]) => {
+      const world = document.createElement('a-entity');
+      world.id = `world-${id}`;
+      world.setAttribute('visible', false);
+
+      const sky = document.createElement('a-sphere');
+      sky.setAttribute('radius', '42');
+      sky.setAttribute('position', '0 1.6 0');
+      sky.setAttribute('material', `side: back; color: ${config.sky}; opacity: 0.92; roughness: 1`);
+
+      const fogShell = document.createElement('a-entity');
+      fogShell.setAttribute('geometry', 'primitive: sphere; radius: 30');
+      fogShell.setAttribute('material', `color: ${config.sky}; side: back; opacity: 0.35; transparent: true`);
+
+      const fx = document.createElement('a-entity');
+      fx.setAttribute('firefly-field', `count: ${config.fx.count}; radius: ${config.fx.radius}; color: ${config.fx.color}; drift: ${config.fx.drift}`);
+
+      const videoGroup = document.createElement('a-entity');
+      const cubePositions = [
+        { x: -1.4, y: 1.2, z: -2.6 },
+        { x: 1.3, y: 1.6, z: -2.4 },
+        { x: 0, y: 0.9, z: -3.1 },
+      ];
+
+      cubePositions.forEach((pos, idx) => {
+        const cube = document.createElement('a-box');
+        cube.setAttribute('depth', '0.9');
+        cube.setAttribute('height', '0.9');
+        cube.setAttribute('width', '0.9');
+        cube.setAttribute('position', `${pos.x} ${pos.y} ${pos.z}`);
+        cube.setAttribute('rotation', `${-6 + idx * 3} ${idx * 20} ${4 - idx * 2}`);
+        cube.setAttribute('material', `src: #${videoSources[idx % videoSources.length].id}; roughness: 0.4; metalness: 0.08; opacity: 0.95`);
+        cube.setAttribute('gentle-float', 'amp: 0.06; speed: 0.22');
+        cube.setAttribute('slow-spin', `speed: ${0.2 + idx * 0.05}`);
+        videoGroup.appendChild(cube);
+      });
+
+      world.appendChild(sky);
+      world.appendChild(fogShell);
+      world.appendChild(fx);
+      world.appendChild(videoGroup);
+      worldContainer.appendChild(world);
+    });
+
+    scene.appendChild(sculpture);
+    scene.appendChild(worldContainer);
+
+    const updateSculptureVisuals = () => {
+      const hoverId = hoverRef.current;
+      bubbleRefs.current.forEach(({ sphere, label, level }, bubbleId) => {
+        const selectedId = selectedRef.current;
+        const isSelected = bubbleId === selectedId;
+        const isHover = bubbleId === hoverId;
+        const opacity = isSelected ? 0.95 : isHover ? 0.85 : 0.65;
+        const emissive = isSelected ? 0.42 : isHover ? 0.32 : 0.18;
+        const scale = isSelected ? 1.22 : isHover ? 1.1 : 1;
+        sphere.setAttribute('material', `roughness: 0.32; metalness: 0.04; opacity: ${opacity}; transparent: true; emissive: ${palette.halo}; emissiveIntensity: ${emissive}`);
+        sphere.setAttribute('soft-pulse', `base: ${scale}; boost: 0.05`);
+        label.setAttribute('visible', spaceModeRef.current === 'reseau');
+      });
+    };
+
+    const selectedRef = { current: null };
+    const spaceModeRef = { current: 'reseau' };
+
+    const selectBubble = (id) => {
+      if (inputLockedRef.current) return;
+      selectedRef.current = id;
+      setSelected(id);
+      updateSculptureVisuals();
+    };
+
+    const setSpaceValue = (nextMode) => {
+      spaceModeRef.current = nextMode;
+      setSpaceMode(nextMode);
+    };
+
+    const showWorld = (id) => {
+      const preset = worldPresets[id];
+      if (!preset || inputLockedRef.current) return;
+      inputLockedRef.current = true;
+      setTimeout(() => {
+        inputLockedRef.current = false;
+      }, 420);
+      sculpture.setAttribute('visible', false);
+      worldContainer.setAttribute('visible', true);
+      Array.from(worldContainer.children).forEach((child) => {
+        child.setAttribute('visible', child.id === `world-${id}`);
+      });
+      scene.setAttribute('fog', preset.fog);
+      setSpaceValue('bulle');
+      startAmbient();
+    };
+
+    const leaveWorld = () => {
+      if (inputLockedRef.current) return;
+      inputLockedRef.current = true;
+      setTimeout(() => {
+        inputLockedRef.current = false;
+      }, 320);
+      worldContainer.setAttribute('visible', false);
+      sculpture.setAttribute('visible', true);
+      scene.removeAttribute('fog');
+      setSpaceValue('reseau');
+      updateSculptureVisuals();
+    };
+
+    actionsRef.current = {
+      enter: () => showWorld(selectedRef.current),
+      exit: leaveWorld,
+      select: selectBubble,
+    };
+
+    const handleSelect = (e) => selectBubble(e.detail.id);
+    const handleHover = (e) => {
+      hoverRef.current = e.detail.id;
+      updateSculptureVisuals();
+    };
+
+    const handleControllerEnter = () => {
+      if (spaceModeRef.current === 'reseau') showWorld(selectedRef.current);
+      else leaveWorld();
+    };
+
+    const handleEnterVr = () => setViewMode('vr');
+    const handleExitVr = () => setViewMode('3d');
+
+    scene.addEventListener('bubble-selected', handleSelect);
+    scene.addEventListener('bubble-hover', handleHover);
+    scene.addEventListener('abuttondown', handleControllerEnter);
+    scene.addEventListener('xbuttondown', handleControllerEnter);
+    scene.addEventListener('enter-vr', handleEnterVr);
+    scene.addEventListener('exit-vr', handleExitVr);
+
+    sceneRef.current = scene;
+    sculptureRef.current = sculpture;
+    worldContainerRef.current = worldContainer;
+    mountRef.current.appendChild(scene);
+
+    selectBubble('root');
+    updateSculptureVisuals();
 
     return () => {
-      scene.removeEventListener('bubble-select', onSelect);
-      scene.removeEventListener('bubble-hover', onHover);
-      scene.removeEventListener('backdrop-release', onBackdrop);
+      scene.removeEventListener('bubble-selected', handleSelect);
+      scene.removeEventListener('bubble-hover', handleHover);
+      scene.removeEventListener('abuttondown', handleControllerEnter);
+      scene.removeEventListener('xbuttondown', handleControllerEnter);
+      scene.removeEventListener('enter-vr', handleEnterVr);
+      scene.removeEventListener('exit-vr', handleExitVr);
+      mountRef.current?.removeChild(scene);
+      bubbleRefs.current.clear();
+      sceneRef.current = null;
+      sculptureRef.current = null;
+      worldContainerRef.current = null;
     };
   }, [ready]);
 
-  const visibleSet = useMemo(() => (focusId ? relatedIds(focusId) : null), [focusId]);
+  const enterSelected = () => {
+    if (!selected || !worldPresets[selected] || inputLockedRef.current) return;
+    actionsRef.current.enter?.();
+  };
+
+  const exitWorld = () => {
+    actionsRef.current.exit?.();
+  };
+
+  const switchTo2d = () => {
+    setViewMode('2d');
+    sceneRef.current?.exitVR?.();
+  };
+
+  const switchTo3d = () => {
+    setViewMode('3d');
+    sceneRef.current?.exitVR?.();
+  };
+
+  const switchToVr = () => {
+    setViewMode('vr');
+    sceneRef.current?.enterVR?.();
+  };
+
+  const clamp = (v, min, max) => Math.min(max, Math.max(min, v));
+
+  const updateMapScale = (next) => {
+    mapScaleRef.current = next;
+    setMapScale(next);
+  };
+
+  const svgCoords = (clientX, clientY) => {
+    const rect = mapRef.current?.getBoundingClientRect();
+    if (!rect) return null;
+    const x = ((clientX - rect.left) / rect.width / mapScaleRef.current) * 100;
+    const y = ((clientY - rect.top) / rect.height / mapScaleRef.current) * 100;
+    return { x: clamp(x, 2, 98), y: clamp(y, 2, 98) };
+  };
+
+  const releaseMapListeners = () => {
+    window.removeEventListener('pointermove', handleMapPointerMove);
+    window.removeEventListener('pointerup', handleMapPointerUp);
+  };
+
+  const handleMapWheel = (e) => {
+    e.preventDefault();
+    const next = clamp(mapScaleRef.current + (e.deltaY > 0 ? -0.06 : 0.06), 0.7, 1.6);
+    updateMapScale(next);
+  };
+
+  const handleMapPointerMove = (e) => {
+    if (!mapTouchesRef.current.has(e.pointerId)) return;
+    mapTouchesRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    const activeTouches = Array.from(mapTouchesRef.current.values());
+
+    if (activeTouches.length >= 2) {
+      const [a, b] = activeTouches;
+      const dist = Math.hypot(a.x - b.x, a.y - b.y);
+      if (!pinchRef.current.base) {
+        pinchRef.current.base = dist;
+        pinchRef.current.start = mapScaleRef.current;
+      } else {
+        const next = clamp((dist / pinchRef.current.base) * pinchRef.current.start, 0.7, 1.6);
+        updateMapScale(next);
+      }
+      mapDragRef.current = { id: null, pointerId: null, moved: false };
+      return;
+    }
+
+    if (mapDragRef.current?.id && mapDragRef.current.pointerId === e.pointerId) {
+      const coords = svgCoords(e.clientX, e.clientY);
+      if (!coords) return;
+      mapDragRef.current.moved = true;
+      setMapNodes((prev) =>
+        prev.map((node) => (node.id === mapDragRef.current.id ? { ...node, ...coords } : node))
+      );
+    }
+  };
+
+  const enterFrom2d = (id) => {
+    if (!id || inputLockedRef.current) return;
+    actionsRef.current.select?.(id);
+    if (worldPresets[id]) {
+      actionsRef.current.enter?.();
+    }
+  };
+
+  const handleMapPointerUp = (e) => {
+    mapTouchesRef.current.delete(e.pointerId);
+    if (mapTouchesRef.current.size < 2) {
+      pinchRef.current.base = null;
+    }
+    if (mapDragRef.current?.pointerId === e.pointerId) {
+      const drag = mapDragRef.current;
+      if (!drag.moved) {
+        enterFrom2d(drag.id);
+      }
+      mapDragRef.current = { id: null, pointerId: null, moved: false };
+    }
+    if (mapTouchesRef.current.size === 0) {
+      releaseMapListeners();
+    }
+  };
+
+  const handleNodePointerDown = (id) => (e) => {
+    e.preventDefault();
+    mapTouchesRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    mapDragRef.current = { id, pointerId: e.pointerId, moved: false };
+    window.addEventListener('pointermove', handleMapPointerMove);
+    window.addEventListener('pointerup', handleMapPointerUp);
+  };
+
+  const handleMapBackgroundPointerDown = (e) => {
+    if (e.target?.closest('[data-node]')) return;
+    e.preventDefault();
+    mapTouchesRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    mapDragRef.current = { id: null, pointerId: null, moved: false };
+    window.addEventListener('pointermove', handleMapPointerMove);
+    window.addEventListener('pointerup', handleMapPointerUp);
+  };
+
+  useEffect(() => () => releaseMapListeners(), []);
 
   if (!ready) {
     return <div style={{ padding: '24px', color: 'rgba(227,241,255,0.7)' }}>Chargement de l’espace…</div>;
   }
 
+  const canEnter = selected && worldPresets[selected] && spaceMode === 'reseau' && !inputLockedRef.current;
+  const canExit = spaceMode === 'bulle';
+  const sceneVisible = viewMode !== '2d' || spaceMode === 'bulle';
+
   return (
-    <a-scene
-      ref={sceneRef}
-      background={`color: ${palette.haze}`}
-      renderer="colorManagement: true; foveationLevel: 2"
-      vr-mode-ui="enabled: true"
-    >
-      <a-entity id="haze" className="backdrop" geometry="primitive: sphere; radius: 32" material={`color: ${palette.haze}; side: back; opacity: 0.42`} backdrop-exit>
-        <a-animation
-          attribute="material.opacity"
-          from="0.36"
-          to="0.48"
-          direction="alternate"
-          dur="7200"
-          repeat="indefinite"
-          easing="easeInOutSine"
-        />
-      </a-entity>
+    <div id="aframe-shell" className="immersive-shell">
+      <div
+        ref={mountRef}
+        className="scene-mount"
+        style={{ opacity: sceneVisible ? 1 : 0, pointerEvents: sceneVisible ? 'auto' : 'none' }}
+      />
 
-      <a-entity
-        id="cameraRig"
-        position="0 1.6 4.4"
-      >
-        <a-entity
-          id="camera"
-          camera="active: true"
-          look-controls="pointerLockEnabled: false"
-          wasd-controls="acceleration: 8"
-        >
-          <a-entity
-            cursor="fuse: true; fuseTimeout: 1200"
-            raycaster="objects: .selectable, .backdrop"
-            position="0 0 -0.9"
-            geometry="primitive: ring; radiusInner: 0.01; radiusOuter: 0.016"
-            material={`color: ${palette.glow}; opacity: 0.45`}
-            soft-pulse="base: 1; boost: 0.06"
-          />
-        </a-entity>
-      </a-entity>
-
-      <a-entity position="0 0 -3">
-        {links.map(({ a, b }) => {
-          const from = bubbles.find((n) => n.id === a);
-          const to = bubbles.find((n) => n.id === b);
-          if (!from || !to) return null;
-          const inFocus = !visibleSet || (visibleSet.has(a) && visibleSet.has(b));
-          const opacity = inFocus ? 0.32 : 0.08;
-          return (
-            <a-entity
-              key={`${a}-${b}`}
-              line={`start: ${from.position.x} ${from.position.y} ${from.position.z}; end: ${to.position.x} ${to.position.y} ${to.position.z}; color: ${palette.link}`}
-              material={`opacity: ${opacity}`}
-            />
-          );
-        })}
-
-        {bubbles.map((bubble) => {
-          const { id, title, level, position } = bubble;
-          const isFocus = focusId === id;
-          const isActive = !visibleSet || visibleSet.has(id);
-          const isHover = hoverId === id;
-          const opacity = isActive ? (isFocus ? 0.95 : 0.75) : 0.22;
-          const scale = isFocus ? 1.15 : isHover ? 1.08 : 1;
-          const amp = 0.05 + level * 0.015;
-          const speed = 0.25 + level * 0.06;
-
-          return (
-            <a-entity
-              key={id}
-              position={`${position.x} ${position.y} ${position.z}`}
-              gentle-float={`amp: ${amp}; speed: ${speed}`}
-            >
-              <a-sphere
-                className="selectable"
-                soft-select={`id: ${id}`}
-                soft-pulse={`base: ${scale}; boost: 0.04`}
-                radius="0.32"
-                color={palette.calm}
-                material={`roughness: 0.3; metalness: 0.02; opacity: ${opacity}; transparent: true; emissive: ${palette.glow}; emissiveIntensity: ${isFocus ? 0.35 : 0.18}`}
+      {viewMode === '2d' && spaceMode === 'reseau' && (
+        <div className="map2d" onWheel={handleMapWheel}>
+          <svg
+            ref={mapRef}
+            viewBox="0 0 100 100"
+            role="presentation"
+            onPointerDown={handleMapBackgroundPointerDown}
+            style={{ transform: `scale(${mapScale})` }}
+          >
+            {links.map(({ a, b }) => {
+              const from = mapNodes.find((n) => n.id === a);
+              const to = mapNodes.find((n) => n.id === b);
+              if (!from || !to) return null;
+              return <line key={`${a}-${b}`} x1={from.x} y1={from.y} x2={to.x} y2={to.y} className="map-link" />;
+            })}
+            {mapNodes.map((node) => (
+              <g
+                key={node.id}
+                data-node
+                onPointerDown={handleNodePointerDown(node.id)}
+                className="map-node"
+                role="button"
+                tabIndex={0}
               >
-                <a-animation
-                  attribute="material.opacity"
-                  to={opacity}
-                  direction="alternate"
-                  dur="2600"
-                  repeat="indefinite"
-                  easing="easeInOutSine"
-                  begin="mouseenter"
-                  end="mouseleave"
+                <circle
+                  cx={node.x}
+                  cy={node.y}
+                  r={8 + node.level * 2}
+                  className={selected === node.id ? 'map-bubble active' : 'map-bubble'}
                 />
-              </a-sphere>
+                <text x={node.x} y={node.y + 0.6} className="map-label">
+                  {node.title}
+                </text>
+              </g>
+            ))}
+          </svg>
+          <div className="map-overlay">Tap court pour entrer · pinch/molette pour zoomer · glisse une bulle pour réorganiser</div>
+        </div>
+      )}
 
-              <a-entity
-                position="0 -0.52 0"
-                face-camera
-                text={`value: ${title}\nNiveau ${level}; align: center; color: ${palette.glow}; opacity: ${isActive ? 0.9 : 0.35}; width: 2`}
-              />
-            </a-entity>
-          );
-        })}
-      </a-entity>
-    </a-scene>
+      <div className="ui-layer">
+        <div className="view-toggle">
+          <button type="button" className={viewMode === '2d' ? 'chip active' : 'chip'} onClick={switchTo2d}>
+            2D
+          </button>
+          <button type="button" className={viewMode === '3d' ? 'chip active' : 'chip'} onClick={switchTo3d}>
+            3D
+          </button>
+          {xrSupported && (
+            <button type="button" className={viewMode === 'vr' ? 'chip active' : 'chip'} onClick={switchToVr}>
+              VR
+            </button>
+          )}
+        </div>
+
+        <div className="action-dock">
+          {viewMode === '2d' ? (
+            spaceMode === 'bulle' ? (
+              <button type="button" className="pill" onClick={exitWorld} disabled={!canExit}>
+                Retour réseau
+              </button>
+            ) : (
+              <div className="action-hint">Mode 2D : tap pour ouvrir une bulle, pinch pour zoomer</div>
+            )
+          ) : (
+            <>
+              <button type="button" className={`pill ${canEnter ? '' : 'disabled'}`} onClick={enterSelected} disabled={!canEnter}>
+                Entrer
+              </button>
+              <button type="button" className={`pill ghost ${canExit ? '' : 'disabled'}`} onClick={exitWorld} disabled={!canExit}>
+                Sortir
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
   );
 }
