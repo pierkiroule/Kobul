@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { bubbles, relatedIds } from './data.js';
+import { bubbles } from './data.js';
 import { startAmbient } from './audio.js';
 
 const AFRAME_CDN = 'https://aframe.io/releases/1.5.0/aframe.min.js';
@@ -20,6 +20,20 @@ function useAframe() {
 
   return ready;
 }
+
+const palette = {
+  base: '#0b131d',
+  ink: '#e3f1ff',
+  halo: '#7dc7ff',
+  low: '#0a0f18',
+  link: '#6286a8',
+};
+
+const worldPresets = {
+  flow: { sky: '#0a1d30', fog: 'color: #0a1d30; density: 0.022', fx: { color: '#8dd2ff', radius: 6, count: 28, drift: 0.018 } },
+  hollow: { sky: '#0c1018', fog: 'color: #0c1018; density: 0.028', fx: { color: '#c4ffc8', radius: 5.2, count: 22, drift: 0.012 } },
+  tide: { sky: '#0b1b21', fog: 'color: #0b1b21; density: 0.02', fx: { color: '#b6e8ff', radius: 7, count: 32, drift: 0.02 } },
+};
 
 function registerComponents() {
   if (!window.AFRAME || window.AFRAME.components['gentle-float']) return;
@@ -54,88 +68,137 @@ function registerComponents() {
     },
   });
 
-  window.AFRAME.registerComponent('backdrop-exit', {
+  window.AFRAME.registerComponent('pulse-field', {
+    schema: { count: { default: 24 }, radius: { default: 6 }, color: { default: '#8dd2ff' }, drift: { default: 0.016 } },
     init() {
-      const el = this.el;
-      const scene = el.sceneEl;
-      const release = () => scene?.emit('backdrop-release');
-      el.addEventListener('click', release);
-      this.remove = () => el.removeEventListener('click', release);
+      this.nodes = [];
+      for (let i = 0; i < this.data.count; i += 1) {
+        const node = document.createElement('a-sphere');
+        const r = Math.random() * this.data.radius;
+        const theta = Math.random() * Math.PI * 2;
+        const phi = Math.random() * Math.PI;
+        const x = r * Math.sin(phi) * Math.cos(theta);
+        const y = r * Math.cos(phi);
+        const z = r * Math.sin(phi) * Math.sin(theta);
+        node.setAttribute('radius', 0.08 + Math.random() * 0.06);
+        node.setAttribute('position', `${x} ${y} ${z}`);
+        node.setAttribute('color', this.data.color);
+        node.setAttribute('material', 'opacity: 0.3; transparent: true; roughness: 0.1; metalness: 0');
+        node.dataset.baseY = y;
+        this.el.appendChild(node);
+        this.nodes.push(node);
+      }
+    },
+    tick(time) {
+      this.nodes.forEach((node, idx) => {
+        const amp = 0.4 + (idx % 5) * 0.04;
+        const speed = this.data.drift * 1000 + (idx % 7) * 3;
+        const baseY = parseFloat(node.dataset.baseY || '0');
+        const offset = Math.sin((time + idx * 30) / speed) * amp;
+        const pos = node.getAttribute('position');
+        node.setAttribute('position', `${pos.x} ${baseY + offset} ${pos.z}`);
+      });
     },
   });
 
-  window.AFRAME.registerComponent('fractal-node', {
+  window.AFRAME.registerComponent('portal-node', {
     schema: { id: { type: 'string' } },
     init() {
       const { id } = this.data;
       const el = this.el;
       const scene = el.sceneEl;
-      let holdTimer = null;
-      let longTriggered = false;
-      let hadPointer = false;
 
-      const focus = () => scene?.emit('bubble-focus', { id });
-      const enter = () => {
-        scene?.emit('bubble-enter', { id });
-        startAmbient();
-      };
-
-      const clearTimer = () => {
-        if (holdTimer) clearTimeout(holdTimer);
-        holdTimer = null;
-      };
-
-      const pointerDown = () => {
-        hadPointer = true;
-        longTriggered = false;
-        clearTimer();
-        holdTimer = setTimeout(() => {
-          longTriggered = true;
-          enter();
-        }, 650);
-      };
-
-      const pointerUp = () => {
-        if (holdTimer) {
-          clearTimer();
-          if (!longTriggered) focus();
-        }
-        longTriggered = false;
-        setTimeout(() => {
-          hadPointer = false;
-        }, 0);
-      };
-
-      const hoverIn = () => scene?.emit('bubble-hover', { id });
-      const hoverOut = () => scene?.emit('bubble-hover', { id: null });
-
-      const click = () => {
-        // Fuse / gaze click in VR has no pointer phase: treat as enter.
-        if (hadPointer) return;
-        enter();
-      };
+      const select = () => scene?.emit('bubble-selected', { id });
 
       el.classList.add('selectable');
-      el.addEventListener('mouseenter', hoverIn);
-      el.addEventListener('mouseleave', hoverOut);
-      el.addEventListener('mousedown', pointerDown);
-      el.addEventListener('mouseup', pointerUp);
-      el.addEventListener('touchstart', pointerDown);
-      el.addEventListener('touchend', pointerUp);
-      el.addEventListener('click', click);
+      el.addEventListener('click', select);
+      el.addEventListener('mouseenter', () => scene?.emit('bubble-hover', { id }));
+      el.addEventListener('mouseleave', () => scene?.emit('bubble-hover', { id: null }));
 
       this.cleanup = () => {
-        el.removeEventListener('mouseenter', hoverIn);
-        el.removeEventListener('mouseleave', hoverOut);
-        el.removeEventListener('mousedown', pointerDown);
-        el.removeEventListener('mouseup', pointerUp);
-        el.removeEventListener('touchstart', pointerDown);
-        el.removeEventListener('touchend', pointerUp);
-        el.removeEventListener('click', click);
+        el.removeEventListener('click', select);
       };
     },
     remove() {
       this.cleanup?.();
+    },
+  });
+
+  window.AFRAME.registerComponent('sculpture-controls', {
+    init() {
+      this.canvas = null;
+      this.touches = new Map();
+      this.startRot = { x: 0, y: 0 };
+      this.startScale = 1;
+      this.activePointers = new Set();
+      this.baseDist = null;
+
+      this.onPointerDown = this.onPointerDown.bind(this);
+      this.onPointerUp = this.onPointerUp.bind(this);
+      this.onPointerMove = this.onPointerMove.bind(this);
+      this.onWheel = this.onWheel.bind(this);
+
+      const scene = this.el.sceneEl;
+      const bindCanvas = () => {
+        if (this.canvas || !scene?.canvas) return;
+        this.canvas = scene.canvas;
+        this.canvas.addEventListener('pointerdown', this.onPointerDown);
+        window.addEventListener('pointerup', this.onPointerUp);
+        window.addEventListener('pointermove', this.onPointerMove);
+        this.canvas.addEventListener('wheel', this.onWheel, { passive: true });
+      };
+
+      this.el.addEventListener('loaded', bindCanvas);
+      bindCanvas();
+    },
+    remove() {
+      if (!this.canvas) return;
+      this.canvas.removeEventListener('pointerdown', this.onPointerDown);
+      window.removeEventListener('pointerup', this.onPointerUp);
+      window.removeEventListener('pointermove', this.onPointerMove);
+      this.canvas.removeEventListener('wheel', this.onWheel);
+    },
+    onPointerDown(e) {
+      this.activePointers.add(e.pointerId);
+      this.touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      this.startRot = { ...this.el.object3D.rotation };
+      this.startScale = this.el.object3D.scale.x;
+      if (this.touches.size < 2) {
+        this.baseDist = null;
+      }
+    },
+    onPointerUp(e) {
+      this.activePointers.delete(e.pointerId);
+      this.touches.delete(e.pointerId);
+      if (this.touches.size < 2) {
+        this.baseDist = null;
+      }
+    },
+    onWheel(e) {
+      const scale = this.el.object3D.scale.x;
+      const next = Math.min(1.6, Math.max(0.55, scale + (e.deltaY > 0 ? -0.05 : 0.05)));
+      this.el.object3D.scale.set(next, next, next);
+    },
+    onPointerMove(e) {
+      if (!this.activePointers.has(e.pointerId)) return;
+      this.touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      const points = Array.from(this.touches.values());
+      if (points.length === 1) {
+        const dx = e.movementX * 0.25;
+        const dy = e.movementY * 0.22;
+        const rot = this.el.object3D.rotation;
+        rot.y += (dx * Math.PI) / 180;
+        rot.x += (dy * Math.PI) / 180;
+      } else if (points.length >= 2) {
+        const [a, b] = points;
+        const dist = Math.hypot(a.x - b.x, a.y - b.y);
+        if (!this.baseDist) {
+          this.baseDist = dist;
+          this.startScale = this.el.object3D.scale.x;
+        }
+        const factor = Math.min(1.6, Math.max(0.55, (dist / this.baseDist) * this.startScale));
+        this.el.object3D.scale.set(factor, factor, factor);
+      }
     },
   });
 }
@@ -156,23 +219,18 @@ function collectLinks() {
 
 const links = collectLinks();
 
-const palette = {
-  calm: '#7dc7ff',
-  glow: '#c5e6ff',
-  low: '#0b1927',
-  link: '#6ba6d1',
-  haze: '#0a0f18',
-};
-
 export default function EchoBulle() {
   const ready = useAframe();
   const mountRef = useRef(null);
   const sceneRef = useRef(null);
-  const focusRef = useRef('root');
-  const hoverRef = useRef(null);
-  const activeRef = useRef('root');
-  const worldRef = useRef(null);
+  const sculptureRef = useRef(null);
+  const worldContainerRef = useRef(null);
+  const bubbleRefs = useRef(new Map());
+  const [mode, setMode] = useState('sculpture');
+  const [selected, setSelected] = useState(null);
   const [xrSupported, setXrSupported] = useState(false);
+  const hoverRef = useRef(null);
+  const actionsRef = useRef({ enter: null, exit: null });
 
   useEffect(() => {
     if (!ready) return;
@@ -187,35 +245,15 @@ export default function EchoBulle() {
   useEffect(() => {
     if (!ready || !mountRef.current) return;
 
-    const bubbleRefs = new Map();
-    const linkRefs = [];
-
     const scene = document.createElement('a-scene');
-    scene.setAttribute('background', `color: ${palette.haze}`);
-    scene.setAttribute('renderer', 'colorManagement: true; foveationLevel: 2; xrCompatible: true');
+    scene.setAttribute('background', `color: ${palette.base}`);
+    scene.setAttribute('renderer', 'colorManagement: true; antialias: true; foveationLevel: 2; xrCompatible: true');
     scene.setAttribute('vr-mode-ui', 'enabled: true');
     scene.setAttribute('webxr', 'optionalFeatures: local-floor, bounded-floor, hand-tracking, dom-overlay; overlayElement: #aframe-shell');
 
-    const haze = document.createElement('a-entity');
-    haze.id = 'haze';
-    haze.className = 'backdrop';
-    haze.setAttribute('geometry', 'primitive: sphere; radius: 32');
-    haze.setAttribute('material', `color: ${palette.haze}; side: back; opacity: 0.42`);
-    haze.setAttribute('backdrop-exit', '');
-    const hazeAnim = document.createElement('a-animation');
-    hazeAnim.setAttribute('attribute', 'material.opacity');
-    hazeAnim.setAttribute('from', '0.36');
-    hazeAnim.setAttribute('to', '0.48');
-    hazeAnim.setAttribute('direction', 'alternate');
-    hazeAnim.setAttribute('dur', '7200');
-    hazeAnim.setAttribute('repeat', 'indefinite');
-    hazeAnim.setAttribute('easing', 'easeInOutSine');
-    haze.appendChild(hazeAnim);
-    scene.appendChild(haze);
-
     const cameraRig = document.createElement('a-entity');
     cameraRig.id = 'cameraRig';
-    cameraRig.setAttribute('position', '0 1.6 4.4');
+    cameraRig.setAttribute('position', '0 1.6 4.2');
     const camera = document.createElement('a-entity');
     camera.id = 'camera';
     camera.setAttribute('camera', 'active: true');
@@ -223,18 +261,19 @@ export default function EchoBulle() {
     camera.setAttribute('wasd-controls', 'acceleration: 8');
     const cursor = document.createElement('a-entity');
     cursor.setAttribute('cursor', 'fuse: true; fuseTimeout: 1200');
-    cursor.setAttribute('raycaster', 'objects: .selectable, .backdrop');
+    cursor.setAttribute('raycaster', 'objects: .selectable');
     cursor.setAttribute('position', '0 0 -0.9');
     cursor.setAttribute('geometry', 'primitive: ring; radiusInner: 0.01; radiusOuter: 0.016');
-    cursor.setAttribute('material', `color: ${palette.glow}; opacity: 0.45`);
+    cursor.setAttribute('material', `color: ${palette.halo}; opacity: 0.45`);
     cursor.setAttribute('soft-pulse', 'base: 1; boost: 0.06');
     camera.appendChild(cursor);
     cameraRig.appendChild(camera);
     scene.appendChild(cameraRig);
 
-    const world = document.createElement('a-entity');
-    world.id = 'world';
-    world.setAttribute('position', '0 0 -3');
+    const sculpture = document.createElement('a-entity');
+    sculpture.id = 'sculpture';
+    sculpture.setAttribute('position', '0 0 0');
+    sculpture.setAttribute('sculpture-controls', '');
 
     links.forEach(({ a, b }) => {
       const from = bubbles.find((n) => n.id === a);
@@ -244,8 +283,7 @@ export default function EchoBulle() {
       link.dataset.link = `${a}::${b}`;
       link.setAttribute('line', `start: ${from.position.x} ${from.position.y} ${from.position.z}; end: ${to.position.x} ${to.position.y} ${to.position.z}; color: ${palette.link}`);
       link.setAttribute('material', 'opacity: 0.32');
-      linkRefs.push(link);
-      world.appendChild(link);
+      sculpture.appendChild(link);
     });
 
     bubbles.forEach((bubble) => {
@@ -257,142 +295,187 @@ export default function EchoBulle() {
       const sphere = document.createElement('a-sphere');
       sphere.className = 'selectable';
       sphere.setAttribute('radius', '0.32');
-      sphere.setAttribute('color', palette.calm);
-      sphere.setAttribute('fractal-node', `id: ${id}`);
-      sphere.setAttribute('soft-pulse', 'base: 1; boost: 0.04');
-      sphere.setAttribute('material', `roughness: 0.3; metalness: 0.02; opacity: 0.75; transparent: true; emissive: ${palette.glow}; emissiveIntensity: 0.18`);
-      const sphereAnim = document.createElement('a-animation');
-      sphereAnim.setAttribute('attribute', 'material.opacity');
-      sphereAnim.setAttribute('direction', 'alternate');
-      sphereAnim.setAttribute('dur', '2600');
-      sphereAnim.setAttribute('repeat', 'indefinite');
-      sphereAnim.setAttribute('easing', 'easeInOutSine');
-      sphereAnim.setAttribute('begin', 'mouseenter');
-      sphereAnim.setAttribute('end', 'mouseleave');
-      sphere.appendChild(sphereAnim);
+      sphere.setAttribute('color', palette.halo);
+      sphere.setAttribute('portal-node', `id: ${id}`);
+      sphere.setAttribute('soft-pulse', 'base: 1; boost: 0.05');
+      sphere.setAttribute('material', `roughness: 0.32; metalness: 0.04; opacity: 0.72; transparent: true; emissive: ${palette.halo}; emissiveIntensity: 0.22`);
 
       const label = document.createElement('a-entity');
       label.setAttribute('position', '0 -0.52 0');
       label.setAttribute('face-camera', '');
-      label.setAttribute('text', `value: ${title}\nNiveau ${level}; align: center; color: ${palette.glow}; opacity: 0.9; width: 2`);
+      label.setAttribute('text', `value: ${title}\nNiveau ${level}; align: center; color: ${palette.ink}; opacity: 0.8; width: 2`);
 
       wrapper.appendChild(sphere);
       wrapper.appendChild(label);
-      world.appendChild(wrapper);
+      sculpture.appendChild(wrapper);
 
-      bubbleRefs.set(id, { wrapper, sphere, label, level, title, position });
+      bubbleRefs.current.set(id, { wrapper, sphere, label, level });
     });
 
-    const setActiveBubble = (id, { keepFocus = false } = {}) => {
-      const target = bubbles.find((b) => b.id === id) ?? bubbles[0];
-      activeRef.current = target.id;
-      if (!keepFocus) {
-        focusRef.current = target.id;
-      }
+    const worldContainer = document.createElement('a-entity');
+    worldContainer.id = 'world-container';
+    worldContainer.setAttribute('visible', false);
 
-      const visibleSet = relatedIds(target.id);
+    Object.entries(worldPresets).forEach(([id, config]) => {
+      const world = document.createElement('a-entity');
+      world.id = `world-${id}`;
+      world.setAttribute('visible', false);
 
-      linkRefs.forEach((link) => {
-        const [a, b] = link.dataset.link.split('::');
-        const inFocus = visibleSet.has(a) && visibleSet.has(b);
-        const opacity = inFocus ? 0.32 : 0.04;
-        link.setAttribute('material', `color: ${palette.link}; opacity: ${opacity}`);
-      });
+      const sky = document.createElement('a-sphere');
+      sky.setAttribute('radius', '42');
+      sky.setAttribute('position', '0 1.6 0');
+      sky.setAttribute('material', `side: back; color: ${config.sky}; opacity: 0.92; roughness: 1`);
 
-      bubbleRefs.forEach(({ sphere, label, level, title, position }, bubbleId) => {
-        const isActive = visibleSet.has(bubbleId);
-        const isFocus = bubbleId === focusRef.current;
-        const isHover = bubbleId === hoverRef.current;
-        const opacity = isActive ? (isFocus ? 0.95 : 0.78) : 0.12;
-        const scale = isFocus ? 1.18 : isHover ? 1.08 : isActive ? 1.02 : 0.82;
+      const fogShell = document.createElement('a-entity');
+      fogShell.setAttribute('geometry', 'primitive: sphere; radius: 30');
+      fogShell.setAttribute('material', `color: ${config.sky}; side: back; opacity: 0.35; transparent: true`);
 
-        sphere.setAttribute(
-          'material',
-          `roughness: 0.32; metalness: 0.02; opacity: ${opacity}; transparent: true; emissive: ${palette.glow}; emissiveIntensity: ${isFocus ? 0.38 : 0.18}`,
-        );
-        sphere.setAttribute('soft-pulse', `base: ${scale}; boost: ${isActive ? 0.05 : 0.02}`);
-        sphere.setAttribute('visible', isActive || isHover || isFocus);
+      const fx = document.createElement('a-entity');
+      fx.setAttribute('pulse-field', `count: ${config.fx.count}; radius: ${config.fx.radius}; color: ${config.fx.color}; drift: ${config.fx.drift}`);
 
-        label.setAttribute(
-          'text',
-          `value: ${title}\nNiveau ${level}; align: center; color: ${palette.glow}; opacity: ${isActive ? 0.88 : 0.2}; width: 2`,
-        );
+      world.appendChild(sky);
+      world.appendChild(fogShell);
+      world.appendChild(fx);
+      worldContainer.appendChild(world);
+    });
 
-        // keep a gentle glow hint even when masked
-        label.setAttribute('visible', isActive);
+    scene.appendChild(sculpture);
+    scene.appendChild(worldContainer);
 
-        if (bubbleId === target.id && worldRef.current) {
-          const anchor = { x: 0, y: 1.35, z: -3.2 };
-          const to = {
-            x: anchor.x - position.x,
-            y: anchor.y - position.y,
-            z: anchor.z - position.z,
-          };
-          worldRef.current.setAttribute('animation__move', `property: position; to: ${to.x} ${to.y} ${to.z}; dur: 1000; easing: easeInOutCubic`);
-          worldRef.current.setAttribute('animation__scale', 'property: scale; to: 1.05 1.05 1.05; dur: 900; easing: easeInOutQuad');
-        }
+    const updateSculptureVisuals = () => {
+      const hoverId = hoverRef.current;
+      bubbleRefs.current.forEach(({ sphere, label, level }, bubbleId) => {
+        const selectedId = selectedRef.current;
+        const isSelected = bubbleId === selectedId;
+        const isHover = bubbleId === hoverId;
+        const opacity = isSelected ? 0.95 : isHover ? 0.85 : 0.65;
+        const emissive = isSelected ? 0.42 : isHover ? 0.32 : 0.18;
+        const scale = isSelected ? 1.22 : isHover ? 1.1 : 1;
+        sphere.setAttribute('material', `roughness: 0.32; metalness: 0.04; opacity: ${opacity}; transparent: true; emissive: ${palette.halo}; emissiveIntensity: ${emissive}`);
+        sphere.setAttribute('soft-pulse', `base: ${scale}; boost: 0.05`);
+        label.setAttribute('visible', modeRef.current === 'sculpture');
       });
     };
 
-    const softFocus = (id) => {
-      focusRef.current = id;
-      setActiveBubble(activeRef.current, { keepFocus: true });
+    const selectedRef = { current: null };
+    const modeRef = { current: 'sculpture' };
+
+    const selectBubble = (id) => {
+      selectedRef.current = id;
+      setSelected(id);
+      updateSculptureVisuals();
     };
 
-    const softHover = (id) => {
-      hoverRef.current = id;
-      setActiveBubble(activeRef.current, { keepFocus: true });
+    const setModeValue = (nextMode) => {
+      modeRef.current = nextMode;
+      setMode(nextMode);
     };
 
-    const openParent = () => {
-      const current = bubbles.find((b) => b.id === activeRef.current);
-      if (current?.parent) {
-        setActiveBubble(current.parent);
+    const showWorld = (id) => {
+      const preset = worldPresets[id];
+      if (!preset) return;
+      sculpture.setAttribute('visible', false);
+      worldContainer.setAttribute('visible', true);
+      Array.from(worldContainer.children).forEach((child) => {
+        child.setAttribute('visible', child.id === `world-${id}`);
+      });
+      scene.setAttribute('fog', preset.fog);
+      setModeValue('monde');
+      startAmbient();
+    };
+
+    const leaveWorld = () => {
+      worldContainer.setAttribute('visible', false);
+      sculpture.setAttribute('visible', true);
+      scene.removeAttribute('fog');
+      setModeValue('sculpture');
+      updateSculptureVisuals();
+    };
+
+    actionsRef.current = {
+      enter: () => showWorld(selectedRef.current),
+      exit: leaveWorld,
+    };
+
+    const handleSelect = (e) => selectBubble(e.detail.id);
+    const handleHover = (e) => {
+      hoverRef.current = e.detail.id;
+      updateSculptureVisuals();
+    };
+
+    const handleControllerEnter = () => {
+      if (modeRef.current === 'sculpture') {
+        showWorld(selectedRef.current);
       } else {
-        setActiveBubble(activeRef.current);
+        leaveWorld();
       }
     };
 
-    const handleEnter = (e) => setActiveBubble(e.detail.id);
-    const handleFocus = (e) => softFocus(e.detail.id);
-    const handleHover = (e) => softHover(e.detail.id);
-
-    scene.addEventListener('bubble-enter', handleEnter);
-    scene.addEventListener('bubble-focus', handleFocus);
+    scene.addEventListener('bubble-selected', handleSelect);
     scene.addEventListener('bubble-hover', handleHover);
-    scene.addEventListener('backdrop-release', openParent);
+    scene.addEventListener('abuttondown', handleControllerEnter);
+    scene.addEventListener('xbuttondown', handleControllerEnter);
 
-    world.addEventListener(
-      'loaded',
-      () => {
-        worldRef.current = world;
-        setActiveBubble(activeRef.current);
-      },
-      { once: true },
-    );
-
-    scene.appendChild(world);
     sceneRef.current = scene;
+    sculptureRef.current = sculpture;
+    worldContainerRef.current = worldContainer;
     mountRef.current.appendChild(scene);
 
+    selectBubble('root');
+    updateSculptureVisuals();
+
     return () => {
-      scene.removeEventListener('bubble-enter', handleEnter);
-      scene.removeEventListener('bubble-focus', handleFocus);
+      scene.removeEventListener('bubble-selected', handleSelect);
       scene.removeEventListener('bubble-hover', handleHover);
-      scene.removeEventListener('backdrop-release', openParent);
+      scene.removeEventListener('abuttondown', handleControllerEnter);
+      scene.removeEventListener('xbuttondown', handleControllerEnter);
       mountRef.current?.removeChild(scene);
+      bubbleRefs.current.clear();
       sceneRef.current = null;
-      worldRef.current = null;
+      sculptureRef.current = null;
+      worldContainerRef.current = null;
     };
   }, [ready]);
+
+  const enterSelected = () => {
+    if (!selected || !worldPresets[selected]) return;
+    actionsRef.current.enter?.();
+  };
+
+  const exitWorld = () => {
+    actionsRef.current.exit?.();
+  };
 
   if (!ready) {
     return <div style={{ padding: '24px', color: 'rgba(227,241,255,0.7)' }}>Chargement de l’espace…</div>;
   }
 
+  const canEnter = selected && worldPresets[selected] && mode === 'sculpture';
+  const canExit = mode === 'monde';
+
   return (
     <div id="aframe-shell" style={{ position: 'relative', width: '100%', height: '100%' }}>
       <div ref={mountRef} style={{ width: '100%', height: '100%' }} />
+      <div className="hud">
+        <div className="pill">{mode === 'sculpture' ? 'Sculpture' : 'Monde'}</div>
+        {selected && (
+          <div className="pill subtle">Bulle : {selected}</div>
+        )}
+        {canEnter && (
+          <button type="button" className="action" onClick={enterSelected}>
+            Entrer
+          </button>
+        )}
+        {canExit && (
+          <button type="button" className="action ghost" onClick={exitWorld}>
+            Sortir
+          </button>
+        )}
+      </div>
+      <div className="gesture-hints">
+        <div>Mobile : 1 doigt = rotation, 2 doigts = zoom, tap = sélectionner, bouton = entrer / sortir</div>
+        <div>VR : regard ou trigger pour sélectionner, grip pour manipuler la sculpture, bouton A/X pour entrer/sortir</div>
+      </div>
       {xrSupported && (
         <button className="enter-vr" type="button" onClick={() => sceneRef.current?.enterVR?.()}>
           Mode VR
