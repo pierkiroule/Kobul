@@ -60,6 +60,29 @@ body {
   box-shadow: 0 18px 45px rgba(0, 0, 0, 0.35);
 }
 
+.enter-vr {
+  position: absolute;
+  right: 14px;
+  bottom: 14px;
+  z-index: 2;
+  padding: 10px 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(125, 199, 255, 0.4);
+  background: rgba(10, 19, 29, 0.82);
+  color: rgba(227, 241, 255, 0.9);
+  font-size: 14px;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  box-shadow: 0 10px 22px rgba(0, 0, 0, 0.28);
+}
+
+.enter-vr:hover {
+  background: rgba(22, 42, 62, 0.9);
+  border-color: rgba(125, 199, 255, 0.7);
+  transform: translateY(-1px);
+}
+
 .scene-overlay {
   position: absolute;
   inset: 0;

@@ -121,12 +121,19 @@ const palette = {
 export default function EchoBulle() {
   const ready = useAframe();
   const mountRef = useRef(null);
+  const sceneRef = useRef(null);
   const focusRef = useRef(null);
   const hoverRef = useRef(null);
+  const [xrSupported, setXrSupported] = useState(false);
 
   useEffect(() => {
     if (!ready) return;
     registerComponents();
+  }, [ready]);
+
+  useEffect(() => {
+    if (!ready || !navigator?.xr?.isSessionSupported) return;
+    navigator.xr.isSessionSupported('immersive-vr').then((supported) => setXrSupported(supported));
   }, [ready]);
 
   useEffect(() => {
@@ -137,8 +144,9 @@ export default function EchoBulle() {
 
     const scene = document.createElement('a-scene');
     scene.setAttribute('background', `color: ${palette.haze}`);
-    scene.setAttribute('renderer', 'colorManagement: true; foveationLevel: 2');
+    scene.setAttribute('renderer', 'colorManagement: true; foveationLevel: 2; xrCompatible: true');
     scene.setAttribute('vr-mode-ui', 'enabled: true');
+    scene.setAttribute('webxr', 'optionalFeatures: local-floor, bounded-floor, hand-tracking, dom-overlay; overlayElement: #aframe-shell');
 
     const haze = document.createElement('a-entity');
     haze.id = 'haze';
@@ -281,6 +289,7 @@ export default function EchoBulle() {
 
     cluster.addEventListener('loaded', applyState, { once: true });
     scene.appendChild(cluster);
+    sceneRef.current = scene;
     mountRef.current.appendChild(scene);
 
     return () => {
@@ -289,6 +298,7 @@ export default function EchoBulle() {
       scene.removeEventListener('backdrop-release', handleBackdrop);
       cluster.removeEventListener('loaded', applyState);
       mountRef.current?.removeChild(scene);
+      sceneRef.current = null;
     };
   }, [ready]);
 
@@ -296,5 +306,14 @@ export default function EchoBulle() {
     return <div style={{ padding: '24px', color: 'rgba(227,241,255,0.7)' }}>Chargement de l’espace…</div>;
   }
 
-  return <div ref={mountRef} style={{ width: '100%', height: '100%' }} />;
+  return (
+    <div id="aframe-shell" style={{ position: 'relative', width: '100%', height: '100%' }}>
+      <div ref={mountRef} style={{ width: '100%', height: '100%' }} />
+      {xrSupported && (
+        <button className="enter-vr" type="button" onClick={() => sceneRef.current?.enterVR?.()}>
+          Mode VR
+        </button>
+      )}
+    </div>
+  );
 }
