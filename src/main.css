@@ -85,8 +85,16 @@ body {
   box-shadow: 0 10px 40px rgba(0, 0, 0, 0.35);
 }
 
-.canvas-wrap canvas {
+.canvas-wrap canvas,
+.canvas-wrap a-scene {
+  position: absolute;
+  inset: 0;
   outline: none;
+}
+
+.canvas-wrap a-scene canvas {
+  width: 100% !important;
+  height: 100% !important;
 }
 
 .look-surface {
@@ -94,6 +102,16 @@ body {
   inset: 0;
   z-index: 1;
   touch-action: none;
+}
+
+.loading {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+  font-size: 14px;
+  letter-spacing: 0.02em;
 }
 
 .joystick-wrapper {
