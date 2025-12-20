@@ -76,6 +76,51 @@ body {
   backdrop-filter: blur(10px);
 }
 
+.joystick-wrapper {
+  position: absolute;
+  bottom: 14px;
+  left: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: center;
+  pointer-events: auto;
+}
+
+.joystick-pad {
+  width: 136px;
+  height: 136px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 30% 30%, rgba(127, 206, 255, 0.18), rgba(6, 12, 20, 0.78));
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: inset 0 0 0 1px rgba(127, 206, 255, 0.1), 0 16px 28px rgba(0, 0, 0, 0.35);
+  position: relative;
+  touch-action: none;
+}
+
+.joystick-nub {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 62px;
+  height: 62px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 40% 35%, rgba(233, 242, 255, 0.7), rgba(127, 206, 255, 0.3));
+  border: 1px solid rgba(127, 206, 255, 0.5);
+  box-shadow: 0 12px 20px rgba(0, 0, 0, 0.3);
+  transition: transform 0.06s ease;
+}
+
+.joystick-hint {
+  font-size: 12px;
+  color: rgba(233, 242, 255, 0.8);
+  padding: 6px 10px;
+  border-radius: 10px;
+  background: rgba(6, 12, 20, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(10px);
+}
+
 .action-hint {
   font-size: 13px;
   color: rgba(233, 242, 255, 0.82);
