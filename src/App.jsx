@@ -365,18 +365,23 @@ export default function App() {
     // Camera controls
     const controls = new OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
+    controls.dampingFactor = 0.12;
+    controls.rotateSpeed = 0.55;
+    controls.zoomSpeed = 0.65;
+    controls.panSpeed = 0.6;
     controlsRef.current = controls;
 
     const raycaster = new THREE.Raycaster();
     const mouse = new THREE.Vector2();
 
-    const onTouch = (event) => {
+    const onScenePointer = (event) => {
       if (menuOpenRef.current || modalOpenRef.current) return;
 
       if (event.cancelable) {
         event.preventDefault();
       }
 
+      const isTouchPointer = event.pointerType === 'touch' || Boolean(event.touches);
       const touch = event.touches ? event.touches[0] : event;
       const rect = sceneContainerRef.current?.getBoundingClientRect();
       if (!rect) return;
@@ -387,21 +392,25 @@ export default function App() {
       const intersects = raycaster.intersectObjects(atoms);
       if (intersects.length > 0) {
         const mesh = intersects[0].object;
-        const now = performance.now();
-        const isSameTarget = lastTapRef.current.id === mesh.uuid;
-        const delta = now - lastTapRef.current.time;
-
-        if (isSameTarget && delta < 380) {
+        if (isTouchPointer) {
           focusBubbleOnMesh(mesh);
           lastTapRef.current = { time: 0, id: null };
         } else {
-          lastTapRef.current = { time: now, id: mesh.uuid };
+          const now = performance.now();
+          const isSameTarget = lastTapRef.current.id === mesh.uuid;
+          const delta = now - lastTapRef.current.time;
+
+          if (isSameTarget && delta < 380) {
+            focusBubbleOnMesh(mesh);
+            lastTapRef.current = { time: 0, id: null };
+          } else {
+            lastTapRef.current = { time: now, id: mesh.uuid };
+          }
         }
       }
     };
 
-    renderer.domElement.addEventListener('touchstart', onTouch, { passive: false });
-    renderer.domElement.addEventListener('mousedown', onTouch);
+    renderer.domElement.addEventListener('pointerdown', onScenePointer, { passive: false });
     const resizeObserver = new ResizeObserver(updateRendererSize);
     resizeObserver.observe(sceneContainerRef.current);
     window.addEventListener('resize', updateRendererSize);
@@ -523,8 +532,7 @@ export default function App() {
     animate();
 
     return () => {
-      renderer.domElement.removeEventListener('touchstart', onTouch);
-      renderer.domElement.removeEventListener('mousedown', onTouch);
+      renderer.domElement.removeEventListener('pointerdown', onScenePointer);
       resizeObserver.disconnect();
       window.removeEventListener('resize', updateRendererSize);
       if (frameId) cancelAnimationFrame(frameId);
@@ -759,6 +767,16 @@ export default function App() {
     }
   }, [localAudioObjectUrl]);
 
+  const handlePilotagePointerDown = (event) => {
+    event.stopPropagation();
+    setIsPilotageHover(true);
+  };
+
+  const handlePilotagePointerEnd = (event) => {
+    event.stopPropagation();
+    setIsPilotageHover(false);
+  };
+
   return (
     <div className="layout">
       <div className="scene" aria-label="Constellation EchoBulle">
@@ -781,6 +799,9 @@ export default function App() {
 
       <div
         className="pilotage"
+        onPointerDownCapture={handlePilotagePointerDown}
+        onPointerUpCapture={handlePilotagePointerEnd}
+        onPointerCancel={handlePilotagePointerEnd}
         onPointerEnter={() => setIsPilotageHover(true)}
         onPointerLeave={() => setIsPilotageHover(false)}
       >
