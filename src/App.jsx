@@ -19,6 +19,7 @@ export default function App() {
   const [isAudioOpen, setIsAudioOpen] = useState(true);
   const [isSelectionOpen, setIsSelectionOpen] = useState(true);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [isTouchOnUi, setIsTouchOnUi] = useState(false);
 
   const audioRef = useRef(null);
   const audioContextRef = useRef(null);
@@ -28,6 +29,10 @@ export default function App() {
   const sourceRef = useRef(null);
   const lastBurstRef = useRef(0);
   const fileInputRef = useRef(null);
+  const controlsRef = useRef(null);
+  const rendererRef = useRef(null);
+  const menuOpenRef = useRef(false);
+  const modalOpenRef = useRef(false);
 
   const palette = [
     0x00d4ff,
@@ -128,6 +133,7 @@ export default function App() {
     renderer.toneMappingExposure = 1.05;
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     mountRef.current.appendChild(renderer.domElement);
+    rendererRef.current = renderer;
 
     // Soft lighting for calm visibility
     const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
@@ -273,11 +279,18 @@ export default function App() {
     // Camera controls
     const controls = new OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
+    controlsRef.current = controls;
 
     const raycaster = new THREE.Raycaster();
     const mouse = new THREE.Vector2();
 
     const onTouch = (event) => {
+      if (menuOpenRef.current || modalOpenRef.current) return;
+
+      if (event.cancelable) {
+        event.preventDefault();
+      }
+
       const touch = event.touches ? event.touches[0] : event;
       mouse.x = (touch.clientX / window.innerWidth) * 2 - 1;
       mouse.y = -(touch.clientY / window.innerHeight) * 2 + 1;
@@ -320,8 +333,8 @@ export default function App() {
       renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     };
 
-    window.addEventListener('touchstart', onTouch);
-    window.addEventListener('mousedown', onTouch);
+    renderer.domElement.addEventListener('touchstart', onTouch, { passive: false });
+    renderer.domElement.addEventListener('mousedown', onTouch);
     window.addEventListener('resize', handleResize);
 
     const clock = new THREE.Clock();
@@ -412,8 +425,8 @@ export default function App() {
     animate();
 
     return () => {
-      window.removeEventListener('touchstart', onTouch);
-      window.removeEventListener('mousedown', onTouch);
+      renderer.domElement.removeEventListener('touchstart', onTouch);
+      renderer.domElement.removeEventListener('mousedown', onTouch);
       window.removeEventListener('resize', handleResize);
       if (frameId) cancelAnimationFrame(frameId);
       controls.dispose();
@@ -435,6 +448,25 @@ export default function App() {
       }
     };
   }, []);
+
+  useEffect(() => {
+    menuOpenRef.current = isMenuOpen;
+    modalOpenRef.current = isModalOpen;
+    setIsTouchOnUi(isMenuOpen || isModalOpen);
+  }, [isMenuOpen, isModalOpen]);
+
+  useEffect(() => {
+    const prefersUi = isTouchOnUi;
+    if (controlsRef.current) {
+      controlsRef.current.enabled = !prefersUi;
+    }
+
+    const canvas = rendererRef.current?.domElement;
+    if (canvas) {
+      canvas.style.pointerEvents = prefersUi ? 'none' : 'auto';
+      canvas.style.touchAction = prefersUi ? 'auto' : 'none';
+    }
+  }, [isTouchOnUi]);
 
   useEffect(() => {
     const audioEl = audioRef.current;
@@ -559,7 +591,7 @@ export default function App() {
   }, [localAudioObjectUrl]);
 
   return (
-    <div ref={mountRef} className="experience">
+    <div ref={mountRef} className={`experience ${isTouchOnUi ? 'ui-focus' : 'scene-focus'}`}>
       <div className="hud">
         <button
           type="button"

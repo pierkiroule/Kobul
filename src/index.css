@@ -22,6 +22,17 @@ body {
 
 .experience {
   display: block;
+  position: relative;
+  overscroll-behavior: contain;
+}
+
+.experience.scene-focus canvas {
+  touch-action: none;
+}
+
+.experience.ui-focus canvas {
+  pointer-events: none;
+  touch-action: auto;
 }
 
 .hud {
