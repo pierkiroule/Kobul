@@ -12,6 +12,7 @@ export default function App() {
     'https://cdn.pixabay.com/audio/2022/03/23/audio_5392c27504.mp3',
   );
   const [currentAudioUrl, setCurrentAudioUrl] = useState('');
+  const [localAudioObjectUrl, setLocalAudioObjectUrl] = useState('');
   const [isAudioActive, setIsAudioActive] = useState(false);
   const [audioError, setAudioError] = useState('');
   const [isIntroOpen, setIsIntroOpen] = useState(true);
@@ -25,6 +26,7 @@ export default function App() {
   const smoothedLevelRef = useRef(0);
   const sourceRef = useRef(null);
   const lastBurstRef = useRef(0);
+  const fileInputRef = useRef(null);
 
   const palette = [
     0x00d4ff,
@@ -91,6 +93,10 @@ export default function App() {
       analyserRef.current.connect(audioContextRef.current.destination);
 
       dataArrayRef.current = new Uint8Array(analyserRef.current.frequencyBinCount);
+    }
+
+    if (audioContextRef.current.state === 'suspended') {
+      await audioContextRef.current.resume();
     }
 
     await audioContextRef.current.resume();
@@ -440,15 +446,21 @@ export default function App() {
 
     const handlePause = () => setIsAudioActive(false);
     const handleEnded = () => setIsAudioActive(false);
+    const handleError = () => {
+      setIsAudioActive(false);
+      setAudioError("Impossible de lire ce flux audio. Vérifiez l'URL, le fichier ou réessayez.");
+    };
 
     audioEl.addEventListener('play', handlePlay);
     audioEl.addEventListener('pause', handlePause);
     audioEl.addEventListener('ended', handleEnded);
+    audioEl.addEventListener('error', handleError);
 
     return () => {
       audioEl.removeEventListener('play', handlePlay);
       audioEl.removeEventListener('pause', handlePause);
       audioEl.removeEventListener('ended', handleEnded);
+      audioEl.removeEventListener('error', handleError);
     };
   }, []);
 
@@ -500,9 +512,50 @@ export default function App() {
     event.preventDefault();
     const trimmed = audioUrlInput.trim();
     if (!trimmed) return;
-    setCurrentAudioUrl(trimmed);
+    setAudioError('');
+    setCurrentAudioUrl((prev) =>
+      prev === trimmed ? `${trimmed}${trimmed.includes('?') ? '&' : '?'}t=${Date.now()}` : trimmed,
+    );
+    if (localAudioObjectUrl) {
+      URL.revokeObjectURL(localAudioObjectUrl);
+      setLocalAudioObjectUrl('');
+    }
     await ensureAudioNodes();
   };
+
+  const handleFilePick = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleFileChange = (event) => {
+    const [file] = event.target.files || [];
+    if (!file) return;
+    if (!file.type.startsWith('audio/')) {
+      setAudioError('Le fichier doit être un audio (.mp3, .wav, .ogg).');
+      return;
+    }
+
+    if (localAudioObjectUrl) {
+      URL.revokeObjectURL(localAudioObjectUrl);
+    }
+
+    const objectUrl = URL.createObjectURL(file);
+    setLocalAudioObjectUrl(objectUrl);
+    setAudioUrlInput(file.name);
+    setAudioError('');
+    setCurrentAudioUrl(objectUrl);
+    // allow re-importing the same file later
+    if (event.target) {
+      // eslint-disable-next-line no-param-reassign
+      event.target.value = '';
+    }
+  };
+
+  useEffect(() => () => {
+    if (localAudioObjectUrl) {
+      URL.revokeObjectURL(localAudioObjectUrl);
+    }
+  }, [localAudioObjectUrl]);
 
   return (
     <div ref={mountRef} className="experience">
@@ -533,7 +586,9 @@ export default function App() {
           <div className="hud-block-head">
             <div>
               <p className="hud-kicker">Faire danser le réseau</p>
-              <p className="hud-sub">Collez une URL mp3 pour guider la danse audioreactive. Doux et subtil.</p>
+              <p className="hud-sub">
+                Collez une URL mp3 ou importez un fichier audio pour guider la danse audioreactive. Doux et subtil.
+              </p>
             </div>
             <div className="hud-head-actions">
               <div className={`audio-status ${isAudioActive ? 'on' : ''}`} aria-live="polite">
@@ -561,9 +616,14 @@ export default function App() {
                   className="audio-input"
                   aria-label="URL audio mp3"
                 />
-                <button type="submit" className="hud-button hud-button-small">
-                  lancer l'audio
-                </button>
+                <div className="audio-actions">
+                  <button type="button" className="hud-button hud-button-ghost" onClick={handleFilePick}>
+                    importer un mp3
+                  </button>
+                  <button type="submit" className="hud-button hud-button-small">
+                    lancer l'audio
+                  </button>
+                </div>
               </form>
               {audioError && <p className="audio-error">{audioError}</p>}
               <audio
@@ -571,8 +631,15 @@ export default function App() {
                 src={currentAudioUrl}
                 controls
                 className="audio-player"
-                preload="none"
+                preload="auto"
                 crossOrigin="anonymous"
+              />
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="audio/mpeg,audio/mp3,audio/wav,audio/ogg,audio/*"
+                className="sr-only"
+                onChange={handleFileChange}
               />
             </>
           )}

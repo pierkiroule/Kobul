@@ -126,6 +126,14 @@ body {
   display: flex;
   gap: 10px;
   align-items: center;
+  flex-wrap: wrap;
+  width: 100%;
+}
+
+.audio-actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
 }
 
 .audio-input {
@@ -185,6 +193,26 @@ body {
   padding: 9px 12px;
 }
 
+.hud-button-ghost {
+  pointer-events: auto;
+  border: 1px dashed rgba(255, 255, 255, 0.22);
+  background: rgba(255, 255, 255, 0.02);
+  color: #d9eaff;
+  padding: 9px 12px;
+  border-radius: 10px;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  cursor: pointer;
+  transition: transform 150ms ease, border-color 180ms ease, background 180ms ease;
+}
+
+.hud-button-ghost:hover {
+  transform: translateY(-1px);
+  border-color: rgba(255, 255, 255, 0.4);
+  background: rgba(0, 214, 255, 0.08);
+}
+
 @keyframes pulse {
   0%,
   100% {
@@ -195,6 +223,17 @@ body {
     transform: scale(1.05);
     opacity: 1;
   }
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  border: 0;
 }
 
 .hud-selection {
