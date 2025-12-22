@@ -62,6 +62,11 @@ function registerCalmComponents() {
         this.velocity = new THREE.Vector3();
         this.heading = new THREE.Vector3();
         this.euler = new THREE.Euler();
+        this.resetMotion = () => {
+          this.velocity.set(0, 0, 0);
+        };
+        // Expose a tiny helper to the element so React can zero the motion.
+        this.el.flushMotion = this.resetMotion;
       },
       tick(time, dt) {
         const delta = Math.min(dt || 16, 48) / 1000;
@@ -87,12 +92,52 @@ function registerCalmComponents() {
       },
     });
   }
+
+  if (!window.AFRAME.components['poem-node']) {
+    window.AFRAME.registerComponent('poem-node', {
+      schema: {
+        text: { default: '' },
+        radius: { default: 1.6 },
+        cooldown: { default: 1400 },
+      },
+      init() {
+        const { THREE } = window;
+        this.three = THREE;
+        this.temp = new THREE.Vector3();
+        this.rigPos = new THREE.Vector3();
+        this.rig = null;
+        this.lastHit = 0;
+      },
+      tick(time) {
+        if (!this.three) return;
+        if (!this.rig) {
+          this.rig = this.el.sceneEl?.querySelector('#cameraRig');
+          if (!this.rig) return;
+        }
+
+        this.el.object3D.getWorldPosition(this.temp);
+        this.rig.object3D.getWorldPosition(this.rigPos);
+        const d = this.temp.distanceTo(this.rigPos);
+        if (d < this.data.radius && time - this.lastHit > this.data.cooldown) {
+          this.lastHit = time;
+          window.dispatchEvent(
+            new CustomEvent('poem-hit', {
+              detail: { text: this.data.text },
+            })
+          );
+        }
+      },
+    });
+  }
 }
 
 export default function App() {
   const ready = useAframeReady();
   const rigRef = useRef(null);
   const [moveInput, setMoveInput] = useState({ x: 0, y: 0 });
+  const [force, setForce] = useState(1.4);
+  const [speed, setSpeed] = useState(1.0);
+  const [poem, setPoem] = useState('');
 
   const heroLines = useMemo(
     () => [
@@ -113,18 +158,84 @@ export default function App() {
     rigRef.current.setAttribute('joystick-motion', {
       x: moveInput.x,
       y: moveInput.y,
-      acceleration: 3.6,
-      damping: 1.9,
-      maxSpeed: 2.8,
+      acceleration: 2.2 * force,
+      damping: 1.1 + speed * 0.6,
+      maxSpeed: 1.8 + speed * 1.6,
     });
-  }, [moveInput]);
+  }, [moveInput, force, speed]);
+
+  useEffect(() => {
+    const handler = (event) => {
+      setPoem(event.detail?.text || '');
+      window.clearTimeout(handler.timer);
+      handler.timer = window.setTimeout(() => setPoem(''), 2200);
+    };
+    window.addEventListener('poem-hit', handler);
+    return () => {
+      window.removeEventListener('poem-hit', handler);
+      window.clearTimeout(handler.timer);
+    };
+  }, []);
+
+  const poemNodes = useMemo(
+    () => [
+      { position: '0 1.2 -2', text: 'un vent intérieur\naiguise la lumière' },
+      { position: '-2.4 0.9 -1.8', text: 'une barque fragile\nsur le lac des pensées' },
+      { position: '2.6 1 -2.2', text: 'un fil d’encre\nse remet à respirer' },
+      { position: '0 1.6 -5', text: 'un pas sans sol\net pourtant un cap' },
+    ],
+    []
+  );
+
+  const recenter = () => {
+    if (!rigRef.current) return;
+    const rig = rigRef.current;
+    rig.object3D.position.set(0, 1.4, 5);
+    rig.object3D.rotation.set(0, 0, 0);
+    rig.components['joystick-motion']?.flushMotion?.();
+    setPoem('recentrage — respire…');
+    window.setTimeout(() => setPoem(''), 1600);
+  };
 
   return (
     <div className="shell">
       <div className="ui">
-        <div className="tag">Mode 3D / Navigation lente</div>
-        <div className="title">ÉchoBulle</div>
-        <div className="subtitle">
+        <div className="title">
+          <div className="label">🫧 Kobul</div>
+          <div className="meta">PsychoCosmos — déplacement par impulsions</div>
+        </div>
+
+        <div className="panel">
+          <div className="row">
+            <label htmlFor="force">force</label>
+            <input
+              id="force"
+              type="range"
+              min="0.4"
+              max="3.0"
+              step="0.05"
+              value={force}
+              onChange={(e) => setForce(parseFloat(e.target.value))}
+            />
+          </div>
+          <div className="row">
+            <label htmlFor="speed">vitesse</label>
+            <input
+              id="speed"
+              type="range"
+              min="0.35"
+              max="2.2"
+              step="0.05"
+              value={speed}
+              onChange={(e) => setSpeed(parseFloat(e.target.value))}
+            />
+          </div>
+          <button type="button" onClick={recenter}>
+            ◉ recentrer
+          </button>
+        </div>
+
+        <div className="subtitle-lines">
           {heroLines.map((line) => (
             <span key={line}>{line}</span>
           ))}
@@ -158,30 +269,18 @@ export default function App() {
             </a-entity>
 
             <a-entity id="field" position="0 0 -4">
-              <a-sphere
-                position="0 1.2 -2"
-                radius="0.9"
-                color="#b1ffe2"
-                material="opacity: 0.72; transparent: true; emissive: #b1ffe2; emissiveIntensity: 0.24; roughness: 0.25; metalness: 0.08"
-                gentle-float="amp: 0.16; speed: 0.32"
-                soft-pulse="base: 1; boost: 0.08; speed: 1"
-              />
-              <a-sphere
-                position="-2.4 0.8 -1.8"
-                radius="0.8"
-                color="#9bd4ff"
-                material="opacity: 0.7; transparent: true; emissive: #9bd4ff; emissiveIntensity: 0.22; roughness: 0.25; metalness: 0.08"
-                gentle-float="amp: 0.12; speed: 0.28"
-                soft-pulse="base: 1; boost: 0.06; speed: 0.9"
-              />
-              <a-sphere
-                position="2.6 1 -2.2"
-                radius="0.85"
-                color="#ffcfe8"
-                material="opacity: 0.7; transparent: true; emissive: #ffcfe8; emissiveIntensity: 0.2; roughness: 0.25; metalness: 0.08"
-                gentle-float="amp: 0.1; speed: 0.3"
-                soft-pulse="base: 1; boost: 0.05; speed: 1.1"
-              />
+              {poemNodes.map((node) => (
+                <a-sphere
+                  key={node.position}
+                  position={node.position}
+                  radius="0.85"
+                  color="#b7d3ff"
+                  material="opacity: 0.74; transparent: true; emissive: #b7d3ff; emissiveIntensity: 0.24; roughness: 0.25; metalness: 0.08"
+                  gentle-float="amp: 0.12; speed: 0.32"
+                  soft-pulse="base: 1; boost: 0.07; speed: 1"
+                  poem-node={`text: ${node.text}; radius: 1.65; cooldown: 1600`}
+                />
+              ))}
               <a-entity position="0 -0.6 -2" geometry="primitive: ring; radiusInner: 6; radiusOuter: 7" material="color: #0d1525; opacity: 0.35; side: double" />
             </a-entity>
           </a-scene>
@@ -190,7 +289,10 @@ export default function App() {
         )}
       </div>
 
-      <VirtualJoystick onChange={setMoveInput} />
+      <VirtualJoystick onChange={setMoveInput} hint="Glisse ou tape pour donner une impulsion" />
+
+      <div className="hint">Astuce : fais des petites impulsions. Laisse l’inertie faire. Approche une bulle : un mot surgit.</div>
+      {poem && <div className="poem show">{poem}</div>}
     </div>
   );
 }
