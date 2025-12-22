@@ -22,6 +22,7 @@ export default function App() {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isTouchOnUi, setIsTouchOnUi] = useState(false);
   const [isPilotageHover, setIsPilotageHover] = useState(false);
+  const [showEnterHint, setShowEnterHint] = useState(false);
   const [isReadyToEnter, setIsReadyToEnter] = useState(false);
   const [carouselIndex, setCarouselIndex] = useState(0);
   const [sceneHeight, setSceneHeight] = useState(0);
@@ -57,6 +58,9 @@ export default function App() {
     0xffd170,
     0x7bffbf,
   ];
+
+  const defaultCameraPosition = React.useMemo(() => ({ x: 0, y: 5, z: 20 }), []);
+  const defaultTarget = React.useMemo(() => ({ x: 0, y: 0, z: 0 }), []);
 
   const basePlaylist = [
     { label: 'Chant de glace (audio)', url: 'https://www2.cs.uic.edu/~i101/SoundFiles/StarWars60.wav' },
@@ -699,6 +703,43 @@ export default function App() {
     setIsMenuOpen(false);
   };
 
+  const handleEnterTap = () => {
+    if (!selectedBubble) {
+      setShowEnterHint(true);
+      return;
+    }
+    setShowEnterHint(false);
+    openModalForSelection();
+  };
+
+  const recenterView = () => {
+    if (!cameraRef.current || !controlsRef.current) return;
+
+    focusTargetRef.current = null;
+    selectedMeshRef.current = null;
+    setSelectedBubble(null);
+    setIsReadyToEnter(false);
+    isReadyToEnterRef.current = false;
+    setShowEnterHint(false);
+
+    gsap.to(cameraRef.current.position, {
+      ...defaultCameraPosition,
+      duration: 1.1,
+      ease: 'power2.inOut',
+    });
+    gsap.to(controlsRef.current.target, {
+      ...defaultTarget,
+      duration: 1.1,
+      ease: 'power2.inOut',
+    });
+  };
+
+  const openBubbleListPanel = () => {
+    setIsMenuOpen(true);
+    setIsListOpen(true);
+    setShowEnterHint(false);
+  };
+
   const renderMedia = (url) => {
     if (!url) return null;
     const lower = url.toLowerCase();
@@ -826,6 +867,57 @@ export default function App() {
 
         <div className={`hud-panel ${isMenuOpen ? 'visible' : ''}`}>
           <div className="pilotage-grid">
+            <div className="hud-block touch-grid">
+              <div className="hud-block-head">
+                <div>
+                  <p className="hud-kicker">Raccourcis tactiles</p>
+                  <p className="hud-title">Grille simple à large toucher</p>
+                  <p className="hud-sub">2 à 3 colonnes fluides selon la largeur et toujours lisibles.</p>
+                </div>
+                <button
+                  type="button"
+                  className="hud-toggle"
+                  aria-pressed={showEnterHint}
+                  onClick={() => setShowEnterHint((open) => !open)}
+                >
+                  {showEnterHint ? 'masquer le rappel' : 'aide « entrer »'}
+                </button>
+              </div>
+
+              {showEnterHint && (
+                <div className="touch-hint" role="status">
+                  <p className="hud-sub">
+                    Touchez une bulle, puis le bouton « entrer » pour ouvrir son monde. Le rappel reste visible en
+                    paysage comme en portrait.
+                  </p>
+                </div>
+              )}
+
+              <div className="touch-grid-buttons" aria-label="Grille d'actions tactiles">
+                <button
+                  type="button"
+                  className="touch-button touch-button-primary"
+                  onClick={handleEnterTap}
+                  disabled={!selectedBubble}
+                >
+                  <span className="touch-label">entrer</span>
+                  <span className="touch-helpline">
+                    {selectedBubble ? 'ouvrir la bulle choisie' : 'sélectionnez d’abord une bulle'}
+                  </span>
+                </button>
+
+                <button type="button" className="touch-button" onClick={recenterView}>
+                  <span className="touch-label">recentrer</span>
+                  <span className="touch-helpline">retour à une vue lisible en un tap</span>
+                </button>
+
+                <button type="button" className="touch-button" onClick={openBubbleListPanel}>
+                  <span className="touch-label">liste des bulles</span>
+                  <span className="touch-helpline">afficher les 25 bulles en grille calme</span>
+                </button>
+              </div>
+            </div>
+
             <div className="hud-block collapsible">
               <div className="hud-block-head">
                 <div>
