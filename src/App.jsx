@@ -8,6 +8,19 @@ export default function App() {
   const [selectedBubble, setSelectedBubble] = useState(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [activeMediaUrl, setActiveMediaUrl] = useState('');
+  const [audioUrlInput, setAudioUrlInput] = useState(
+    'https://cdn.pixabay.com/audio/2022/03/23/audio_5392c27504.mp3',
+  );
+  const [currentAudioUrl, setCurrentAudioUrl] = useState('');
+  const [isAudioActive, setIsAudioActive] = useState(false);
+
+  const audioRef = useRef(null);
+  const audioContextRef = useRef(null);
+  const analyserRef = useRef(null);
+  const dataArrayRef = useRef(null);
+  const smoothedLevelRef = useRef(0);
+  const sourceRef = useRef(null);
+  const lastBurstRef = useRef(0);
 
   const palette = [
     0x00d4ff,
@@ -50,6 +63,34 @@ export default function App() {
       };
     });
   }, []);
+
+  const ensureAudioNodes = async () => {
+    const audioEl = audioRef.current;
+    if (!audioEl) return;
+
+    if (!audioContextRef.current) {
+      const context = new (window.AudioContext || window.webkitAudioContext)();
+      audioContextRef.current = context;
+    }
+
+    if (!analyserRef.current && audioContextRef.current) {
+      const analyser = audioContextRef.current.createAnalyser();
+      analyser.fftSize = 256;
+      analyser.smoothingTimeConstant = 0.8;
+      analyserRef.current = analyser;
+    }
+
+    if (!sourceRef.current && audioContextRef.current && analyserRef.current) {
+      const source = audioContextRef.current.createMediaElementSource(audioEl);
+      sourceRef.current = source;
+      source.connect(analyserRef.current);
+      analyserRef.current.connect(audioContextRef.current.destination);
+
+      dataArrayRef.current = new Uint8Array(analyserRef.current.frequencyBinCount);
+    }
+
+    await audioContextRef.current.resume();
+  };
 
   useEffect(() => {
     if (!mountRef.current) return undefined;
@@ -100,10 +141,50 @@ export default function App() {
     const stars = new THREE.Points(starGeometry, starMaterial);
     scene.add(stars);
 
+    const particleGroup = new THREE.Group();
+    scene.add(particleGroup);
+
     // Atom cluster
     const geometry = new THREE.SphereGeometry(1.35, 32, 32);
     const atoms = [];
     const bubbleMaterials = [];
+    const bursts = [];
+
+    const spawnBurst = (center) => {
+      const count = Math.floor(8 + Math.random() * 12);
+      const burstGeometry = new THREE.BufferGeometry();
+      const positions = new Float32Array(count * 3);
+      const velocities = [];
+
+      for (let i = 0; i < count; i += 1) {
+        const dir = new THREE.Vector3(
+          Math.random() * 2 - 1,
+          Math.random() * 1.6 - 0.8,
+          Math.random() * 2 - 1,
+        )
+          .normalize()
+          .multiplyScalar(0.12 + Math.random() * 0.18);
+        velocities.push(dir);
+
+        positions[i * 3] = center.x + dir.x * 4;
+        positions[i * 3 + 1] = center.y + dir.y * 4;
+        positions[i * 3 + 2] = center.z + dir.z * 4;
+      }
+
+      burstGeometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+
+      const burstMaterial = new THREE.PointsMaterial({
+        color: 0xffffff,
+        size: 0.08,
+        transparent: true,
+        opacity: 0.7,
+        depthWrite: false,
+      });
+
+      const points = new THREE.Points(burstGeometry, burstMaterial);
+      particleGroup.add(points);
+      bursts.push({ points, burstGeometry, burstMaterial, velocities, bornAt: clock.getElapsedTime() });
+    };
 
     const createBubbleMaterial = (color) =>
       new THREE.MeshPhysicalMaterial({
@@ -129,6 +210,12 @@ export default function App() {
       mesh.userData.floatSpeed = 0.22 + Math.random() * 0.32;
       mesh.userData.floatRadius = 0.38 + Math.random() * 0.35;
       mesh.userData.pulseOffset = Math.random() * Math.PI * 2;
+      mesh.userData.drift = new THREE.Vector3(
+        Math.random() * 1.5 - 0.75,
+        Math.random() * 1.2 - 0.6,
+        Math.random() * 1.5 - 0.75,
+      );
+      mesh.userData.noiseOffset = Math.random() * 100;
       mesh.userData.meta = bubbleData;
       scene.add(mesh);
       atoms.push(mesh);
@@ -231,22 +318,81 @@ export default function App() {
     const animate = () => {
       const elapsed = clock.getElapsedTime();
 
+      let currentLevel = smoothedLevelRef.current;
+      let audioDelta = 0;
+
+      if (analyserRef.current && dataArrayRef.current) {
+        analyserRef.current.getByteTimeDomainData(dataArrayRef.current);
+        let sum = 0;
+        for (let i = 0; i < dataArrayRef.current.length; i += 1) {
+          const centered = dataArrayRef.current[i] - 128;
+          sum += centered * centered;
+        }
+        const rms = Math.sqrt(sum / dataArrayRef.current.length);
+        const normalized = Math.min(rms / 64, 1);
+        audioDelta = normalized - currentLevel;
+        currentLevel = THREE.MathUtils.lerp(currentLevel, normalized, 0.08);
+        smoothedLevelRef.current = currentLevel;
+      }
+
       atoms.forEach((atom, index) => {
         const speed = atom.userData.floatSpeed;
         const radius = atom.userData.floatRadius;
         const base = atom.userData.basePosition;
         const offset = atom.userData.pulseOffset;
+        const drift = atom.userData.drift;
+        const noise = atom.userData.noiseOffset;
 
-        atom.position.x = base.x + Math.sin(elapsed * speed + index) * radius;
-        atom.position.y = base.y + Math.sin(elapsed * speed * 0.85 + offset) * radius;
-        atom.position.z = base.z + Math.cos(elapsed * speed + offset) * radius * 0.6;
+        const sway = currentLevel * 0.25;
 
-        const scalePulse = 1 + Math.sin(elapsed * 0.9 + offset) * 0.04;
+        atom.position.x =
+          base.x + Math.sin(elapsed * speed + index) * radius + Math.sin(elapsed * 0.7 + noise) * drift.x * sway;
+        atom.position.y =
+          base.y + Math.sin(elapsed * speed * 0.85 + offset) * radius + Math.cos(elapsed * 0.6 + noise) * drift.y * sway;
+        atom.position.z =
+          base.z + Math.cos(elapsed * speed + offset) * radius * 0.6 + Math.sin(elapsed * 0.5 + noise * 0.5) * drift.z * sway;
+
+        const scalePulse = 1 + Math.sin(elapsed * 0.9 + offset) * 0.04 + currentLevel * 0.05;
         atom.scale.setScalar(scalePulse);
-        atom.rotation.y += 0.0015;
+        atom.rotation.y += 0.0015 + currentLevel * 0.001;
+
+        if (bubbleMaterials[index]) {
+          bubbleMaterials[index].emissiveIntensity = 0.12 + currentLevel * 0.35;
+        }
       });
 
-      lineMaterial.opacity = 0.2 + Math.sin(elapsed * 0.6) * 0.08;
+      lineMaterial.opacity = 0.2 + Math.sin(elapsed * 0.6) * 0.08 + currentLevel * 0.25;
+
+      if (audioDelta > 0.07 && currentLevel > 0.05 && elapsed - lastBurstRef.current > 0.4 && atoms.length) {
+        const target = atoms[Math.floor(Math.random() * atoms.length)].position;
+        spawnBurst(target);
+        lastBurstRef.current = elapsed;
+      }
+
+      for (let i = bursts.length - 1; i >= 0; i -= 1) {
+        const burst = bursts[i];
+        const age = elapsed - burst.bornAt;
+        const life = 1.8;
+        const decay = Math.max(1 - age / life, 0);
+        const positions = burst.burstGeometry.attributes.position.array;
+
+        for (let j = 0; j < burst.velocities.length; j += 1) {
+          const v = burst.velocities[j];
+          positions[j * 3] += v.x * 0.6;
+          positions[j * 3 + 1] += v.y * 0.6;
+          positions[j * 3 + 2] += v.z * 0.6;
+        }
+
+        burst.burstGeometry.attributes.position.needsUpdate = true;
+        burst.burstMaterial.opacity = 0.7 * decay;
+
+        if (decay <= 0.02) {
+          particleGroup.remove(burst.points);
+          burst.burstGeometry.dispose();
+          burst.burstMaterial.dispose();
+          bursts.splice(i, 1);
+        }
+      }
 
       frameId = requestAnimationFrame(animate);
       controls.update();
@@ -266,13 +412,48 @@ export default function App() {
       lineGeom.dispose();
       lineMaterial.dispose();
       bubbleMaterials.forEach((material) => material.dispose());
-      scene.remove(links, stars, ambientLight, mainLight, ...atoms);
+      bursts.forEach((burst) => {
+        particleGroup.remove(burst.points);
+        burst.burstGeometry.dispose();
+        burst.burstMaterial.dispose();
+      });
+      scene.remove(particleGroup, links, stars, ambientLight, mainLight, ...atoms);
       renderer.dispose();
       if (mountRef.current?.contains(renderer.domElement)) {
         mountRef.current.removeChild(renderer.domElement);
       }
     };
   }, []);
+
+  useEffect(() => {
+    const audioEl = audioRef.current;
+    if (!audioEl) return undefined;
+
+    const handlePlay = async () => {
+      await ensureAudioNodes();
+      setIsAudioActive(true);
+    };
+
+    const handlePause = () => setIsAudioActive(false);
+    const handleEnded = () => setIsAudioActive(false);
+
+    audioEl.addEventListener('play', handlePlay);
+    audioEl.addEventListener('pause', handlePause);
+    audioEl.addEventListener('ended', handleEnded);
+
+    return () => {
+      audioEl.removeEventListener('play', handlePlay);
+      audioEl.removeEventListener('pause', handlePause);
+      audioEl.removeEventListener('ended', handleEnded);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!currentAudioUrl) return;
+    const audioEl = audioRef.current;
+    if (!audioEl) return;
+    audioEl.play().catch(() => {});
+  }, [currentAudioUrl]);
 
   const currentPlaylist = selectedBubble?.playlist || [];
 
@@ -295,6 +476,14 @@ export default function App() {
     return <iframe title="Ressource" src={url} className="media-frame" />;
   };
 
+  const handleAudioSubmit = async (event) => {
+    event.preventDefault();
+    const trimmed = audioUrlInput.trim();
+    if (!trimmed) return;
+    setCurrentAudioUrl(trimmed);
+    await ensureAudioNodes();
+  };
+
   return (
     <div ref={mountRef} className="experience">
       <div className="hud">
@@ -302,6 +491,32 @@ export default function App() {
           <p className="hud-kicker">Constellation vivante</p>
           <p className="hud-title">25 bulles reliées par des fils lumineux</p>
           <p className="hud-sub">Sélectionnez une bulle pour vous en approcher et ouvrir son contenu transmédia.</p>
+        </div>
+
+        <div className="hud-block hud-audio">
+          <div className="hud-audio-head">
+            <div>
+              <p className="hud-kicker">Faire danser le réseau</p>
+              <p className="hud-sub">Collez une URL mp3 pour guider la danse audioreactive. Doux et subtil.</p>
+            </div>
+            <div className={`audio-status ${isAudioActive ? 'on' : ''}`} aria-live="polite">
+              <span className="pulse-dot" />
+              <span>{isAudioActive ? 'le réseau respire avec le son' : 'en attente de son'}</span>
+            </div>
+          </div>
+          <form className="audio-form" onSubmit={handleAudioSubmit}>
+            <input
+              value={audioUrlInput}
+              onChange={(e) => setAudioUrlInput(e.target.value)}
+              placeholder="https://.../votre-son.mp3"
+              className="audio-input"
+              aria-label="URL audio mp3"
+            />
+            <button type="submit" className="hud-button hud-button-small">
+              lancer l'audio
+            </button>
+          </form>
+          <audio ref={audioRef} src={currentAudioUrl} controls className="audio-player" preload="none" />
         </div>
 
         {selectedBubble && (
