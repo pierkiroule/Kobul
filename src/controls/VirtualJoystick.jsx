@@ -24,8 +24,18 @@ export default function VirtualJoystick({ onChange, hint = 'Glisser pour dérive
       const dx = clientX - cx;
       const dy = clientY - cy;
       const radius = rect.width / 2;
-      const nx = clamp(dx / radius, -1, 1);
-      const ny = clamp(dy / radius, -1, 1);
+      let nx = clamp(dx / radius, -1, 1);
+      let ny = clamp(dy / radius, -1, 1);
+
+      // emulate CAD mobile viewers: small deadzone + axial snap for precise strafe/orbit
+      const dead = 0.06;
+      if (Math.abs(nx) < dead) nx = 0;
+      if (Math.abs(ny) < dead) ny = 0;
+
+      const snap = 0.92;
+      if (Math.abs(nx) > snap) nx = Math.sign(nx);
+      if (Math.abs(ny) > snap) ny = Math.sign(ny);
+
       setStick({ x: nx, y: ny });
     };
 
@@ -71,6 +81,7 @@ export default function VirtualJoystick({ onChange, hint = 'Glisser pour dérive
     <div className="joystick-wrapper">
       <div className="joystick-hint">{hint}</div>
       <div className="joystick-pad" ref={padRef}>
+        <div className="joystick-cross" aria-hidden="true" />
         <div
           className="joystick-nub"
           style={{

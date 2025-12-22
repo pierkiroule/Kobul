@@ -53,19 +53,28 @@ function registerCalmComponents() {
       schema: {
         x: { default: 0 },
         y: { default: 0 },
+        mode: { default: 'strafe' },
+        pivot: { type: 'vec3', default: { x: 0, y: 1.4, z: -2.4 } },
         acceleration: { default: 3.6 },
         damping: { default: 1.9 },
         maxSpeed: { default: 2.8 },
+        deadZone: { default: 0.04 },
+        orbitYawRate: { default: 1.8 },
+        orbitDolly: { default: 1.2 },
+        orbitMin: { default: 1.6 },
+        orbitMax: { default: 18 },
       },
       init() {
         const { THREE } = window;
         this.velocity = new THREE.Vector3();
         this.heading = new THREE.Vector3();
         this.euler = new THREE.Euler();
+        this.pivotVec = new THREE.Vector3();
+        this.orbitOffset = new THREE.Vector3();
+        this.up = new THREE.Vector3(0, 1, 0);
         this.resetMotion = () => {
           this.velocity.set(0, 0, 0);
         };
-        // Expose a tiny helper to the element so React can zero the motion.
         this.el.flushMotion = this.resetMotion;
       },
       tick(time, dt) {
@@ -73,7 +82,40 @@ function registerCalmComponents() {
         const { THREE } = window;
         if (!THREE) return;
 
-        this.heading.set(this.data.x || 0, 0, -(this.data.y || 0));
+        const inputX = this.data.x || 0;
+        const inputY = this.data.y || 0;
+        const deadZone = this.data.deadZone;
+
+        if (this.data.mode === 'orbit') {
+          // Mobile CAO-like orbit: rotate around a pivot and dolly in/out with the joystick.
+          this.pivotVec.set(this.data.pivot.x, this.data.pivot.y, this.data.pivot.z);
+          this.orbitOffset.copy(this.el.object3D.position).sub(this.pivotVec);
+
+          let dist = Math.max(this.orbitOffset.length(), this.data.orbitMin);
+
+          if (Math.abs(inputX) > deadZone) {
+            this.orbitOffset.applyAxisAngle(this.up, -inputX * this.data.orbitYawRate * delta);
+          }
+
+          if (Math.abs(inputY) > deadZone) {
+            const dolly = inputY * this.data.orbitDolly * delta;
+            dist = Math.min(this.data.orbitMax, Math.max(this.data.orbitMin, dist + dolly));
+          }
+
+          if (dist > 0) {
+            this.orbitOffset.setLength(dist);
+          }
+
+          this.el.object3D.position.copy(this.pivotVec).add(this.orbitOffset);
+          this.el.object3D.lookAt(this.pivotVec);
+
+          // keep inertia cleared so orbiting stays crisp
+          const damping = Math.exp(-this.data.damping * delta);
+          this.velocity.multiplyScalar(damping * 0.92);
+          return;
+        }
+
+        this.heading.set(inputX, 0, -inputY);
         if (this.heading.lengthSq() > 1) this.heading.normalize();
 
         this.euler.set(0, this.el.object3D.rotation.y, 0, 'YXZ');
@@ -138,11 +180,12 @@ export default function App() {
   const [force, setForce] = useState(1.4);
   const [speed, setSpeed] = useState(1.0);
   const [poem, setPoem] = useState('');
+  const [navMode, setNavMode] = useState('orbit');
 
   const heroLines = useMemo(
     () => [
       'ÉchoBulle — navigation contemplative',
-      'Glisser pour orienter. Joystick pour dériver.',
+      'Glisser pour orienter. Joystick façon CAO moléculaire.',
       'Doux, stable, mobile-first.',
     ],
     []
@@ -158,11 +201,13 @@ export default function App() {
     rigRef.current.setAttribute('joystick-motion', {
       x: moveInput.x,
       y: moveInput.y,
+      mode: navMode,
+      pivot: { x: 0, y: 1.4, z: -2.4 },
       acceleration: 2.2 * force,
       damping: 1.1 + speed * 0.6,
       maxSpeed: 1.8 + speed * 1.6,
     });
-  }, [moveInput, force, speed]);
+  }, [moveInput, force, speed, navMode]);
 
   useEffect(() => {
     const handler = (event) => {
@@ -233,6 +278,22 @@ export default function App() {
           <button type="button" onClick={recenter}>
             ◉ recentrer
           </button>
+          <div className="mode-toggle" role="group" aria-label="mode de navigation">
+            <button
+              type="button"
+              className={navMode === 'orbit' ? 'active' : ''}
+              onClick={() => setNavMode('orbit')}
+            >
+              orbite
+            </button>
+            <button
+              type="button"
+              className={navMode === 'strafe' ? 'active' : ''}
+              onClick={() => setNavMode('strafe')}
+            >
+              translation
+            </button>
+          </div>
         </div>
 
         <div className="subtitle-lines">
@@ -289,7 +350,14 @@ export default function App() {
         )}
       </div>
 
-      <VirtualJoystick onChange={setMoveInput} hint="Glisse ou tape pour donner une impulsion" />
+      <VirtualJoystick
+        onChange={setMoveInput}
+        hint={
+          navMode === 'orbit'
+            ? 'Glisse pour orbiter comme sur un viewer moléculaire (GPAO/CAO).'
+            : 'Glisse pour dériver en translation douce.'
+        }
+      />
 
       <div className="hint">Astuce : fais des petites impulsions. Laisse l’inertie faire. Approche une bulle : un mot surgit.</div>
       {poem && <div className="poem show">{poem}</div>}
