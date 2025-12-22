@@ -18,8 +18,11 @@ export default function App() {
   const [isIntroOpen, setIsIntroOpen] = useState(true);
   const [isAudioOpen, setIsAudioOpen] = useState(true);
   const [isSelectionOpen, setIsSelectionOpen] = useState(true);
+  const [isListOpen, setIsListOpen] = useState(true);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isTouchOnUi, setIsTouchOnUi] = useState(false);
+  const [isReadyToEnter, setIsReadyToEnter] = useState(false);
+  const [carouselIndex, setCarouselIndex] = useState(0);
 
   const audioRef = useRef(null);
   const audioContextRef = useRef(null);
@@ -33,6 +36,15 @@ export default function App() {
   const rendererRef = useRef(null);
   const menuOpenRef = useRef(false);
   const modalOpenRef = useRef(false);
+  const atomsRef = useRef([]);
+  const bubbleMaterialsRef = useRef([]);
+  const haloRef = useRef(null);
+  const cameraRef = useRef(null);
+  const focusTargetRef = useRef(null);
+  const selectedMeshRef = useRef(null);
+  const lastTapRef = useRef({ time: 0, id: null });
+  const carouselRef = useRef(null);
+  const isReadyToEnterRef = useRef(false);
 
   const palette = [
     0x00d4ff,
@@ -108,6 +120,48 @@ export default function App() {
     await audioContextRef.current.resume();
   };
 
+  const focusBubbleOnMesh = (mesh, { openModal = false, mediaUrl } = {}) => {
+    if (!mesh || !cameraRef.current || !controlsRef.current) return;
+
+    const bubbleMeta = mesh.userData.meta;
+    selectedMeshRef.current = mesh;
+    focusTargetRef.current = mesh.position.clone();
+    setIsReadyToEnter(false);
+
+    setSelectedBubble({
+      id: bubbleMeta.id,
+      title: bubbleMeta.title,
+      playlist: bubbleMeta.playlist,
+      color: bubbleMeta.color,
+    });
+    setIsSelectionOpen(true);
+
+    const resolvedMedia = mediaUrl || (openModal ? bubbleMeta.playlist[0]?.url || '' : '');
+    setActiveMediaUrl(resolvedMedia);
+    setIsModalOpen(openModal);
+
+    gsap.to(cameraRef.current.position, {
+      x: mesh.position.x,
+      y: mesh.position.y,
+      z: mesh.position.z + 10,
+      duration: 1.2,
+      ease: 'power2.inOut',
+    });
+    gsap.to(controlsRef.current.target, {
+      x: mesh.position.x,
+      y: mesh.position.y,
+      z: mesh.position.z,
+      duration: 1.2,
+    });
+  };
+
+  const focusBubbleById = (bubbleId, options = {}) => {
+    const mesh = atomsRef.current.find((atom) => atom.userData.meta.id === bubbleId);
+    if (mesh) {
+      focusBubbleOnMesh(mesh, options);
+    }
+  };
+
   useEffect(() => {
     if (!mountRef.current) return undefined;
 
@@ -122,6 +176,7 @@ export default function App() {
       1000,
     );
     camera.position.set(0, 5, 20);
+    cameraRef.current = camera;
 
     const renderer = new THREE.WebGLRenderer({
       antialias: true,
@@ -243,6 +298,22 @@ export default function App() {
     };
 
     bubbles.forEach((bubble) => createAtom(bubble));
+    atomsRef.current = atoms;
+    bubbleMaterialsRef.current = bubbleMaterials;
+
+    const haloGeometry = new THREE.SphereGeometry(1.55, 48, 48);
+    const haloMaterial = new THREE.MeshBasicMaterial({
+      color: 0xffffff,
+      transparent: true,
+      opacity: 0.12,
+      side: THREE.BackSide,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+    const halo = new THREE.Mesh(haloGeometry, haloMaterial);
+    halo.visible = false;
+    scene.add(halo);
+    haloRef.current = halo;
 
     // Luminous links between nearest neighbors
     const lineMaterial = new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.22 });
@@ -299,30 +370,16 @@ export default function App() {
       const intersects = raycaster.intersectObjects(atoms);
       if (intersects.length > 0) {
         const mesh = intersects[0].object;
-        const position = mesh.position;
-        const bubbleMeta = mesh.userData.meta;
+        const now = performance.now();
+        const isSameTarget = lastTapRef.current.id === mesh.uuid;
+        const delta = now - lastTapRef.current.time;
 
-        setSelectedBubble({
-          id: bubbleMeta.id,
-          title: bubbleMeta.title,
-          playlist: bubbleMeta.playlist,
-        });
-        setIsModalOpen(false);
-        setActiveMediaUrl('');
-
-        gsap.to(camera.position, {
-          x: position.x,
-          y: position.y,
-          z: position.z + 10,
-          duration: 1.2,
-          ease: 'power2.inOut',
-        });
-        gsap.to(controls.target, {
-          x: position.x,
-          y: position.y,
-          z: position.z,
-          duration: 1.2,
-        });
+        if (isSameTarget && delta < 380) {
+          focusBubbleOnMesh(mesh);
+          lastTapRef.current = { time: 0, id: null };
+        } else {
+          lastTapRef.current = { time: now, id: mesh.uuid };
+        }
       }
     };
 
@@ -383,9 +440,25 @@ export default function App() {
         if (bubbleMaterials[index]) {
           bubbleMaterials[index].emissiveIntensity = 0.12 + currentLevel * 0.35;
         }
+
+        if (selectedMeshRef.current && atom.uuid === selectedMeshRef.current.uuid) {
+          bubbleMaterials[index].emissiveIntensity = 0.38 + currentLevel * 0.6;
+        }
       });
 
       lineMaterial.opacity = 0.2 + Math.sin(elapsed * 0.6) * 0.08 + currentLevel * 0.25;
+
+      if (haloRef.current && selectedMeshRef.current) {
+        const halo = haloRef.current;
+        halo.visible = true;
+        halo.position.copy(selectedMeshRef.current.position);
+        const haloPulse = 1.35 + Math.sin(elapsed * 1.8) * 0.08 + currentLevel * 0.35;
+        halo.scale.setScalar(haloPulse);
+        halo.material.opacity = 0.12 + currentLevel * 0.3;
+        halo.material.color.setHex(selectedMeshRef.current.userData.meta.color);
+      } else if (haloRef.current) {
+        haloRef.current.visible = false;
+      }
 
       if (audioDelta > 0.07 && currentLevel > 0.05 && elapsed - lastBurstRef.current > 0.4 && atoms.length) {
         const target = atoms[Math.floor(Math.random() * atoms.length)].position;
@@ -418,6 +491,19 @@ export default function App() {
         }
       }
 
+      if (focusTargetRef.current && cameraRef.current) {
+        const cameraDistance = cameraRef.current.position.distanceTo(focusTargetRef.current);
+        const targetDistance = controls.target.distanceTo(focusTargetRef.current);
+        const isAligned = cameraDistance < 0.6 && targetDistance < 0.2;
+        if (isAligned !== isReadyToEnterRef.current) {
+          isReadyToEnterRef.current = isAligned;
+          setIsReadyToEnter(isAligned);
+        }
+      } else if (isReadyToEnterRef.current) {
+        isReadyToEnterRef.current = false;
+        setIsReadyToEnter(false);
+      }
+
       frameId = requestAnimationFrame(animate);
       controls.update();
       renderer.render(scene, camera);
@@ -435,17 +521,20 @@ export default function App() {
       geometry.dispose();
       lineGeom.dispose();
       lineMaterial.dispose();
+      haloGeometry.dispose();
+      haloMaterial.dispose();
       bubbleMaterials.forEach((material) => material.dispose());
       bursts.forEach((burst) => {
         particleGroup.remove(burst.points);
         burst.burstGeometry.dispose();
         burst.burstMaterial.dispose();
       });
-      scene.remove(particleGroup, links, stars, ambientLight, mainLight, ...atoms);
+      scene.remove(particleGroup, links, stars, ambientLight, mainLight, halo, ...atoms);
       renderer.dispose();
       if (mountRef.current?.contains(renderer.domElement)) {
         mountRef.current.removeChild(renderer.domElement);
       }
+      cameraRef.current = null;
     };
   }, []);
 
@@ -454,6 +543,10 @@ export default function App() {
     modalOpenRef.current = isModalOpen;
     setIsTouchOnUi(isMenuOpen || isModalOpen);
   }, [isMenuOpen, isModalOpen]);
+
+  useEffect(() => {
+    isReadyToEnterRef.current = isReadyToEnter;
+  }, [isReadyToEnter]);
 
   useEffect(() => {
     const prefersUi = isTouchOnUi;
@@ -521,6 +614,31 @@ export default function App() {
   }, [currentAudioUrl]);
 
   const currentPlaylist = selectedBubble?.playlist || [];
+
+  useEffect(() => {
+    setCarouselIndex(0);
+    if (!selectedBubble) {
+      focusTargetRef.current = null;
+      selectedMeshRef.current = null;
+    }
+    isReadyToEnterRef.current = false;
+    setIsReadyToEnter(false);
+  }, [selectedBubble]);
+
+  useEffect(() => {
+    if (!carouselRef.current) return;
+    const targetCard = carouselRef.current.querySelector(`[data-index='${carouselIndex}']`);
+    if (targetCard?.scrollIntoView) {
+      targetCard.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+    }
+  }, [carouselIndex]);
+
+  const openModalForSelection = () => {
+    if (!selectedBubble) return;
+    setActiveMediaUrl((prev) => prev || currentPlaylist[0]?.url || '');
+    setIsModalOpen(true);
+    setIsMenuOpen(false);
+  };
 
   const renderMedia = (url) => {
     if (!url) return null;
@@ -629,6 +747,41 @@ export default function App() {
             )}
           </div>
 
+          <div className="hud-block collapsible">
+            <div className="hud-block-head">
+              <div>
+                <p className="hud-kicker">Accès direct</p>
+                <p className="hud-sub">Liste complète des bulles à ouvrir en un tap.</p>
+              </div>
+              <button
+                type="button"
+                className="hud-toggle"
+                onClick={() => setIsListOpen((open) => !open)}
+                aria-expanded={isListOpen}
+              >
+                {isListOpen ? 'replier' : 'déplier'}
+              </button>
+            </div>
+            {isListOpen && (
+              <div className="bubble-list">
+                {bubbles.map((bubble, index) => (
+                  <button
+                    key={bubble.id}
+                    type="button"
+                    className="bubble-list-item"
+                    onClick={() => focusBubbleById(bubble.id, { openModal: true })}
+                  >
+                    <span className="bubble-chip">{index + 1}</span>
+                    <div className="bubble-meta">
+                      <span className="bubble-name">{bubble.title}</span>
+                      <span className="bubble-mini">ouvrir le transmédia</span>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
           <div className="hud-block hud-audio collapsible">
             <div className="hud-block-head">
               <div>
@@ -713,18 +866,72 @@ export default function App() {
                 <button
                   type="button"
                   className="hud-button"
-                  onClick={() => {
-                    setIsModalOpen(true);
-                    setActiveMediaUrl(currentPlaylist[0]?.url || '');
-                  }}
+                  onClick={openModalForSelection}
                 >
                   afficher son contenu transmédia
                 </button>
               )}
             </div>
           )}
+
+          {selectedBubble && isSelectionOpen && currentPlaylist.length > 0 && (
+            <div className="hud-carousel">
+              <div className="carousel-head">
+                <p className="hud-label">Playlist transmédia</p>
+                <div className="carousel-controls">
+                  <button
+                    type="button"
+                    className="carousel-nav"
+                    onClick={() =>
+                      setCarouselIndex((prev) =>
+                        (prev - 1 + currentPlaylist.length) % currentPlaylist.length,
+                      )
+                    }
+                    aria-label="Précédent"
+                  >
+                    ‹
+                  </button>
+                  <button
+                    type="button"
+                    className="carousel-nav"
+                    onClick={() => setCarouselIndex((prev) => (prev + 1) % currentPlaylist.length)}
+                    aria-label="Suivant"
+                  >
+                    ›
+                  </button>
+                </div>
+              </div>
+              <div className="carousel-window" ref={carouselRef}>
+                {currentPlaylist.map((item, index) => (
+                  <button
+                    key={item.url}
+                    type="button"
+                    data-index={index}
+                    className={`carousel-card ${carouselIndex === index ? 'active' : ''}`}
+                    onClick={() => {
+                      setCarouselIndex(index);
+                      setActiveMediaUrl(item.url);
+                      setIsModalOpen(true);
+                    }}
+                  >
+                    <span className="bubble-mini">#{index + 1}</span>
+                    <span className="carousel-title">{item.label}</span>
+                    <span className="bubble-mini">voir / écouter</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       </div>
+
+      {selectedBubble && isReadyToEnter && !isModalOpen && (
+        <div className="enter-cta">
+          <button type="button" className="enter-button" onClick={openModalForSelection}>
+            enter
+          </button>
+        </div>
+      )}
 
       {isModalOpen && selectedBubble && (
         <div className="modal-overlay" role="dialog" aria-modal="true">

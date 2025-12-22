@@ -171,6 +171,65 @@ body {
   gap: 6px;
 }
 
+.bubble-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 240px;
+  overflow: auto;
+  padding-top: 4px;
+}
+
+.bubble-list-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 12px;
+  padding: 10px 12px;
+  color: #e8f7ff;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 160ms ease, background 160ms ease, transform 160ms ease;
+}
+
+.bubble-list-item:hover {
+  border-color: rgba(0, 214, 255, 0.35);
+  background: rgba(255, 255, 255, 0.05);
+  transform: translateY(-1px);
+}
+
+.bubble-chip {
+  min-width: 32px;
+  height: 32px;
+  border-radius: 10px;
+  display: grid;
+  place-items: center;
+  font-weight: 700;
+  background: linear-gradient(120deg, rgba(0, 214, 255, 0.28), rgba(255, 95, 213, 0.32));
+  color: #02020a;
+  box-shadow: 0 6px 16px rgba(0, 214, 255, 0.24);
+}
+
+.bubble-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.bubble-name {
+  font-weight: 600;
+  font-size: 15px;
+}
+
+.bubble-mini {
+  font-size: 12px;
+  color: #9fb8d9;
+  letter-spacing: 0.03em;
+}
+
 .hud-block-head {
   display: flex;
   justify-content: space-between;
@@ -391,6 +450,107 @@ body {
 .hud-button:hover {
   transform: translateY(-1px);
   border-color: rgba(255, 255, 255, 0.35);
+}
+
+.hud-carousel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 6px;
+  pointer-events: auto;
+}
+
+.carousel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.carousel-controls {
+  display: flex;
+  gap: 8px;
+}
+
+.carousel-nav {
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.06);
+  color: #e8f7ff;
+  border-radius: 10px;
+  width: 36px;
+  height: 32px;
+  cursor: pointer;
+  transition: transform 160ms ease, border-color 160ms ease;
+}
+
+.carousel-nav:hover {
+  transform: translateY(-1px);
+  border-color: rgba(0, 214, 255, 0.4);
+}
+
+.carousel-window {
+  display: flex;
+  gap: 10px;
+  overflow-x: auto;
+  padding: 6px 2px 2px;
+  scroll-snap-type: x mandatory;
+}
+
+.carousel-card {
+  min-width: 180px;
+  max-width: 220px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.04);
+  color: #e8f7ff;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  cursor: pointer;
+  scroll-snap-align: center;
+  transition: transform 160ms ease, border-color 160ms ease, background 160ms ease;
+}
+
+.carousel-card:hover,
+.carousel-card.active {
+  transform: translateY(-1px);
+  border-color: rgba(0, 214, 255, 0.35);
+  background: linear-gradient(120deg, rgba(0, 214, 255, 0.08), rgba(255, 95, 213, 0.08));
+}
+
+.carousel-title {
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.enter-cta {
+  position: fixed;
+  left: 50%;
+  bottom: 28px;
+  transform: translateX(-50%);
+  z-index: 3;
+  pointer-events: none;
+}
+
+.enter-button {
+  pointer-events: auto;
+  border: 1px solid rgba(0, 214, 255, 0.5);
+  background: linear-gradient(120deg, rgba(0, 214, 255, 0.4), rgba(255, 95, 213, 0.35));
+  color: #02020a;
+  padding: 12px 20px;
+  border-radius: 999px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  box-shadow: 0 12px 28px rgba(0, 214, 255, 0.3);
+  cursor: pointer;
+  transition: transform 160ms ease, box-shadow 160ms ease;
+}
+
+.enter-button:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 14px 36px rgba(0, 214, 255, 0.4);
 }
 
 .modal-overlay {
