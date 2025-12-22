@@ -327,6 +327,7 @@ export default function EchoBulle() {
   const ready = useAframe();
   const mountRef = useRef(null);
   const sceneRef = useRef(null);
+  const cameraRigRef = useRef(null);
   const sculptureRef = useRef(null);
   const worldContainerRef = useRef(null);
   const bubbleRefs = useRef(new Map());
@@ -362,6 +363,9 @@ export default function EchoBulle() {
   const mapTouchesRef = useRef(new Map());
   const mapDragRef = useRef({ id: null, pointerId: null, moved: false });
   const pinchRef = useRef({ base: null, start: 1 });
+  const joystickStateRef = useRef({ active: false, x: 0, y: 0 });
+  const joystickTouchRef = useRef(null);
+  const [joystickOffset, setJoystickOffset] = useState({ x: 0, y: 0 });
 
   useEffect(() => {
     if (!ready) return;
@@ -613,6 +617,7 @@ export default function EchoBulle() {
     scene.addEventListener('exit-vr', handleExitVr);
 
     sceneRef.current = scene;
+    cameraRigRef.current = cameraRig;
     sculptureRef.current = sculpture;
     worldContainerRef.current = worldContainer;
     mountRef.current.appendChild(scene);
@@ -630,6 +635,7 @@ export default function EchoBulle() {
       mountRef.current?.removeChild(scene);
       bubbleRefs.current.clear();
       sceneRef.current = null;
+      cameraRigRef.current = null;
       sculptureRef.current = null;
       worldContainerRef.current = null;
     };
@@ -758,6 +764,88 @@ export default function EchoBulle() {
 
   useEffect(() => () => releaseMapListeners(), []);
 
+  const resetJoystick = () => {
+    joystickStateRef.current = { active: false, x: 0, y: 0 };
+    setJoystickOffset({ x: 0, y: 0 });
+    joystickTouchRef.current = null;
+    window.removeEventListener('pointermove', handleJoystickPointerMove);
+    window.removeEventListener('pointerup', handleJoystickPointerUp);
+  };
+
+  const handleJoystickPointerMove = (e) => {
+    if (joystickTouchRef.current?.id !== e.pointerId) return;
+    updateJoystick(e.clientX, e.clientY);
+  };
+
+  const handleJoystickPointerUp = (e) => {
+    if (joystickTouchRef.current?.id && joystickTouchRef.current.id !== e.pointerId) return;
+    resetJoystick();
+  };
+
+  const updateJoystick = (clientX, clientY, rect = joystickTouchRef.current?.rect) => {
+    if (!rect) return;
+    const cx = rect.left + rect.width / 2;
+    const cy = rect.top + rect.height / 2;
+    const dx = clientX - cx;
+    const dy = clientY - cy;
+    const radius = rect.width / 2;
+    const dist = Math.min(Math.hypot(dx, dy), radius);
+    const angle = Math.atan2(dy, dx);
+    const normX = dist === 0 ? 0 : (dist / radius) * Math.cos(angle);
+    const normY = dist === 0 ? 0 : (dist / radius) * Math.sin(angle);
+    joystickStateRef.current = { active: true, x: normX, y: normY };
+    setJoystickOffset({ x: normX * 28, y: normY * 28 });
+  };
+
+  const handleJoystickPointerDown = (e) => {
+    if (viewMode === '2d' || spaceMode !== 'reseau') return;
+    e.preventDefault();
+    const rect = e.currentTarget.getBoundingClientRect();
+    joystickTouchRef.current = { id: e.pointerId, rect };
+    updateJoystick(e.clientX, e.clientY, rect);
+    window.addEventListener('pointermove', handleJoystickPointerMove);
+    window.addEventListener('pointerup', handleJoystickPointerUp);
+  };
+
+  useEffect(() => {
+    if (viewMode === '2d' || spaceMode !== 'reseau') {
+      resetJoystick();
+    }
+  }, [viewMode, spaceMode]);
+
+  useEffect(() => {
+    let raf = null;
+    let last = null;
+
+    const step = (time) => {
+      if (!last) last = time;
+      const dt = Math.min((time - last) / 1000, 0.05);
+      last = time;
+
+      const rig = cameraRigRef.current;
+      const { active, x, y } = joystickStateRef.current;
+      const canMove = active && viewMode !== '2d' && spaceMode === 'reseau';
+
+      if (rig && canMove) {
+        const rotY = rig.object3D.rotation.y;
+        const forwardX = -Math.sin(rotY);
+        const forwardZ = -Math.cos(rotY);
+        const rightX = Math.cos(rotY);
+        const rightZ = -Math.sin(rotY);
+        const speed = 1.4;
+        const moveX = (rightX * x + forwardX * y) * speed * dt;
+        const moveZ = (rightZ * x + forwardZ * y) * speed * dt;
+        rig.object3D.position.x += moveX;
+        rig.object3D.position.z += moveZ;
+      }
+
+      raf = requestAnimationFrame(step);
+    };
+
+    raf = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(raf);
+  }, [viewMode, spaceMode]);
+
   if (!ready) {
     return <div style={{ padding: '24px', color: 'rgba(227,241,255,0.7)' }}>Chargement de l’espace…</div>;
   }
@@ -849,6 +937,23 @@ export default function EchoBulle() {
             </>
           )}
         </div>
+
+        {viewMode !== '2d' && spaceMode === 'reseau' && (
+          <div className="joystick-wrapper">
+            <div
+              className="joystick-pad"
+              role="presentation"
+              onPointerDown={handleJoystickPointerDown}
+              onPointerUp={handleJoystickPointerUp}
+            >
+              <div
+                className="joystick-nub"
+                style={{ transform: `translate(calc(-50% + ${joystickOffset.x}px), calc(-50% + ${joystickOffset.y}px))` }}
+              />
+            </div>
+            <div className="joystick-hint">Glisse doucement pour dériver</div>
+          </div>
+        )}
       </div>
     </div>
   );
