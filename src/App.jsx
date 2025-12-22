@@ -1,59 +1,31 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import gsap from 'gsap';
 
 export default function App() {
-  const mountRef = useRef(null);
+  const sceneContainerRef = useRef(null);
+  const networkCanvasRef = useRef(null);
+  const interiorContainerRef = useRef(null);
   const [selectedBubble, setSelectedBubble] = useState(null);
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [activeMediaUrl, setActiveMediaUrl] = useState('');
-  const [audioUrlInput, setAudioUrlInput] = useState(
-    'https://cdn.pixabay.com/audio/2022/03/23/audio_5392c27504.mp3',
-  );
-  const [currentAudioUrl, setCurrentAudioUrl] = useState('');
-  const [localAudioObjectUrl, setLocalAudioObjectUrl] = useState('');
-  const [isAudioActive, setIsAudioActive] = useState(false);
-  const [audioError, setAudioError] = useState('');
-  const [isIntroOpen, setIsIntroOpen] = useState(true);
-  const [isAudioOpen, setIsAudioOpen] = useState(true);
-  const [isSelectionOpen, setIsSelectionOpen] = useState(true);
-  const [isListOpen, setIsListOpen] = useState(true);
-  const [isMenuOpen, setIsMenuOpen] = useState(false);
-  const [isTouchOnUi, setIsTouchOnUi] = useState(false);
-  const [isReadyToEnter, setIsReadyToEnter] = useState(false);
-  const [enterButtonPos, setEnterButtonPos] = useState({ x: 0, y: 0, visible: false });
-  const [carouselIndex, setCarouselIndex] = useState(0);
 
-  const audioRef = useRef(null);
-  const audioContextRef = useRef(null);
-  const analyserRef = useRef(null);
-  const dataArrayRef = useRef(null);
-  const smoothedLevelRef = useRef(0);
-  const sourceRef = useRef(null);
-  const lastBurstRef = useRef(0);
-  const fileInputRef = useRef(null);
-  const controlsRef = useRef(null);
-  const rendererRef = useRef(null);
-  const menuOpenRef = useRef(false);
-  const modalOpenRef = useRef(false);
   const atomsRef = useRef([]);
   const bubbleMaterialsRef = useRef([]);
   const haloRef = useRef(null);
   const cameraRef = useRef(null);
+  const controlsRef = useRef(null);
+  const rendererRef = useRef(null);
   const focusTargetRef = useRef(null);
   const selectedMeshRef = useRef(null);
   const lastTapRef = useRef({ time: 0, id: null });
-  const carouselRef = useRef(null);
-  const isReadyToEnterRef = useRef(false);
+  const lastBurstRef = useRef(0);
 
-  const palette = [
-    0x00d4ff,
-    0xff4fd4,
-    0x7cf7ff,
-    0xffd170,
-    0x7bffbf,
-  ];
+  const interiorSceneRef = useRef(null);
+  const interiorRendererRef = useRef(null);
+  const interiorCameraRef = useRef(null);
+  const interiorObjectsRef = useRef({ textMesh: null, particles: null, videoMesh: null, videoEl: null });
+
+  const palette = [0x00d4ff, 0xff4fd4, 0x7cf7ff, 0xffd170, 0x7bffbf];
 
   const basePlaylist = [
     { label: 'Chant de glace (audio)', url: 'https://www2.cs.uic.edu/~i101/SoundFiles/StarWars60.wav' },
@@ -62,12 +34,12 @@ export default function App() {
     { label: 'Chemin luminescent (page)', url: 'https://example.org' },
   ];
 
-  const bubbles = React.useMemo(() => {
+  const bubbles = useMemo(() => {
     const count = 25;
     const goldenAngle = Math.PI * (3 - Math.sqrt(5));
     return Array.from({ length: count }, (_, index) => {
       const theta = goldenAngle * index;
-      const y = 1 - (index / (count - 1)) * 2; // from 1 to -1
+      const y = 1 - (index / (count - 1)) * 2;
       const radius = Math.sqrt(1 - y * y);
       const spread = 14.5 + (index % 5) * 0.3;
       const position = new THREE.Vector3(
@@ -89,45 +61,12 @@ export default function App() {
     });
   }, []);
 
-  const ensureAudioNodes = async () => {
-    const audioEl = audioRef.current;
-    if (!audioEl) return;
-
-    if (!audioContextRef.current) {
-      const context = new (window.AudioContext || window.webkitAudioContext)();
-      audioContextRef.current = context;
-    }
-
-    if (!analyserRef.current && audioContextRef.current) {
-      const analyser = audioContextRef.current.createAnalyser();
-      analyser.fftSize = 256;
-      analyser.smoothingTimeConstant = 0.8;
-      analyserRef.current = analyser;
-    }
-
-    if (!sourceRef.current && audioContextRef.current && analyserRef.current) {
-      const source = audioContextRef.current.createMediaElementSource(audioEl);
-      sourceRef.current = source;
-      source.connect(analyserRef.current);
-      analyserRef.current.connect(audioContextRef.current.destination);
-
-      dataArrayRef.current = new Uint8Array(analyserRef.current.frequencyBinCount);
-    }
-
-    if (audioContextRef.current.state === 'suspended') {
-      await audioContextRef.current.resume();
-    }
-
-    await audioContextRef.current.resume();
-  };
-
-  const focusBubbleOnMesh = (mesh, { openModal = false, mediaUrl } = {}) => {
+  const focusBubbleOnMesh = (mesh) => {
     if (!mesh || !cameraRef.current || !controlsRef.current) return;
 
     const bubbleMeta = mesh.userData.meta;
     selectedMeshRef.current = mesh;
     focusTargetRef.current = mesh.position.clone();
-    setIsReadyToEnter(false);
 
     setSelectedBubble({
       id: bubbleMeta.id,
@@ -135,11 +74,6 @@ export default function App() {
       playlist: bubbleMeta.playlist,
       color: bubbleMeta.color,
     });
-    setIsSelectionOpen(true);
-
-    const resolvedMedia = mediaUrl || (openModal ? bubbleMeta.playlist[0]?.url || '' : '');
-    setActiveMediaUrl(resolvedMedia);
-    setIsModalOpen(openModal);
 
     gsap.to(cameraRef.current.position, {
       x: mesh.position.x,
@@ -156,50 +90,43 @@ export default function App() {
     });
   };
 
-  const focusBubbleById = (bubbleId, options = {}) => {
+  const focusBubbleById = (bubbleId) => {
     const mesh = atomsRef.current.find((atom) => atom.userData.meta.id === bubbleId);
     if (mesh) {
-      focusBubbleOnMesh(mesh, options);
+      focusBubbleOnMesh(mesh);
     }
   };
 
   useEffect(() => {
-    if (!mountRef.current) return undefined;
+    if (!sceneContainerRef.current) return undefined;
 
-    // Base scene and camera
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x02020a);
 
     const camera = new THREE.PerspectiveCamera(
       75,
-      window.innerWidth / window.innerHeight,
+      sceneContainerRef.current.clientWidth / sceneContainerRef.current.clientHeight,
       0.1,
       1000,
     );
     camera.position.set(0, 5, 20);
     cameraRef.current = camera;
 
-    const renderer = new THREE.WebGLRenderer({
-      antialias: true,
-      powerPreference: 'high-performance',
-    });
-    renderer.setSize(window.innerWidth, window.innerHeight);
+    const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+    renderer.setSize(sceneContainerRef.current.clientWidth, sceneContainerRef.current.clientHeight);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1.05;
     renderer.outputColorSpace = THREE.SRGBColorSpace;
-    mountRef.current.appendChild(renderer.domElement);
     rendererRef.current = renderer;
+    networkCanvasRef.current.appendChild(renderer.domElement);
 
-    // Soft lighting for calm visibility
     const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
     scene.add(ambientLight);
-
     const mainLight = new THREE.PointLight(0xffffff, 2, 100);
     mainLight.position.set(10, 20, 10);
     scene.add(mainLight);
 
-    // Star field for depth
     const starGeometry = new THREE.BufferGeometry();
     const starMaterial = new THREE.PointsMaterial({ color: 0xffffff });
     const starVertices = [];
@@ -217,7 +144,6 @@ export default function App() {
     const particleGroup = new THREE.Group();
     scene.add(particleGroup);
 
-    // Atom cluster
     const geometry = new THREE.SphereGeometry(1.35, 32, 32);
     const atoms = [];
     const bubbleMaterials = [];
@@ -230,11 +156,7 @@ export default function App() {
       const velocities = [];
 
       for (let i = 0; i < count; i += 1) {
-        const dir = new THREE.Vector3(
-          Math.random() * 2 - 1,
-          Math.random() * 1.6 - 0.8,
-          Math.random() * 2 - 1,
-        )
+        const dir = new THREE.Vector3(Math.random() * 2 - 1, Math.random() * 1.6 - 0.8, Math.random() * 2 - 1)
           .normalize()
           .multiplyScalar(0.12 + Math.random() * 0.18);
         velocities.push(dir);
@@ -245,7 +167,6 @@ export default function App() {
       }
 
       burstGeometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-
       const burstMaterial = new THREE.PointsMaterial({
         color: 0xffffff,
         size: 0.08,
@@ -283,11 +204,7 @@ export default function App() {
       mesh.userData.floatSpeed = 0.22 + Math.random() * 0.32;
       mesh.userData.floatRadius = 0.38 + Math.random() * 0.35;
       mesh.userData.pulseOffset = Math.random() * Math.PI * 2;
-      mesh.userData.drift = new THREE.Vector3(
-        Math.random() * 1.5 - 0.75,
-        Math.random() * 1.2 - 0.6,
-        Math.random() * 1.5 - 0.75,
-      );
+      mesh.userData.drift = new THREE.Vector3(Math.random() * 1.5 - 0.75, Math.random() * 1.2 - 0.6, Math.random() * 1.5 - 0.75);
       mesh.userData.noiseOffset = Math.random() * 100;
       mesh.userData.meta = bubbleData;
       scene.add(mesh);
@@ -316,17 +233,13 @@ export default function App() {
     scene.add(halo);
     haloRef.current = halo;
 
-    // Luminous links between nearest neighbors
     const lineMaterial = new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.22 });
     const positionsArray = [];
 
     bubbles.forEach((source, idx) => {
       const neighbors = [...bubbles]
         .filter((candidate) => candidate.id !== source.id)
-        .map((candidate) => ({
-          candidate,
-          distance: source.position.distanceTo(candidate.position),
-        }))
+        .map((candidate) => ({ candidate, distance: source.position.distanceTo(candidate.position) }))
         .sort((a, b) => a.distance - b.distance)
         .slice(0, 3);
 
@@ -348,7 +261,6 @@ export default function App() {
     links.frustumCulled = false;
     scene.add(links);
 
-    // Camera controls
     const controls = new OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
     controlsRef.current = controls;
@@ -357,15 +269,14 @@ export default function App() {
     const mouse = new THREE.Vector2();
 
     const onTouch = (event) => {
-      if (menuOpenRef.current || modalOpenRef.current) return;
-
       if (event.cancelable) {
         event.preventDefault();
       }
 
       const touch = event.touches ? event.touches[0] : event;
-      mouse.x = (touch.clientX / window.innerWidth) * 2 - 1;
-      mouse.y = -(touch.clientY / window.innerHeight) * 2 + 1;
+      const bounds = renderer.domElement.getBoundingClientRect();
+      mouse.x = ((touch.clientX - bounds.left) / bounds.width) * 2 - 1;
+      mouse.y = -((touch.clientY - bounds.top) / bounds.height) * 2 + 1;
 
       raycaster.setFromCamera(mouse, camera);
       const intersects = raycaster.intersectObjects(atoms);
@@ -385,9 +296,11 @@ export default function App() {
     };
 
     const handleResize = () => {
-      camera.aspect = window.innerWidth / window.innerHeight;
+      const width = sceneContainerRef.current.clientWidth;
+      const height = sceneContainerRef.current.clientHeight;
+      camera.aspect = width / height;
       camera.updateProjectionMatrix();
-      renderer.setSize(window.innerWidth, window.innerHeight);
+      renderer.setSize(width, height);
       renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     };
 
@@ -396,26 +309,8 @@ export default function App() {
     window.addEventListener('resize', handleResize);
 
     const clock = new THREE.Clock();
-    let frameId;
     const animate = () => {
       const elapsed = clock.getElapsedTime();
-
-      let currentLevel = smoothedLevelRef.current;
-      let audioDelta = 0;
-
-      if (analyserRef.current && dataArrayRef.current) {
-        analyserRef.current.getByteTimeDomainData(dataArrayRef.current);
-        let sum = 0;
-        for (let i = 0; i < dataArrayRef.current.length; i += 1) {
-          const centered = dataArrayRef.current[i] - 128;
-          sum += centered * centered;
-        }
-        const rms = Math.sqrt(sum / dataArrayRef.current.length);
-        const normalized = Math.min(rms / 64, 1);
-        audioDelta = normalized - currentLevel;
-        currentLevel = THREE.MathUtils.lerp(currentLevel, normalized, 0.08);
-        smoothedLevelRef.current = currentLevel;
-      }
 
       atoms.forEach((atom, index) => {
         const speed = atom.userData.floatSpeed;
@@ -425,43 +320,38 @@ export default function App() {
         const drift = atom.userData.drift;
         const noise = atom.userData.noiseOffset;
 
-        const sway = currentLevel * 0.25;
+        atom.position.x = base.x + Math.sin(elapsed * speed + index) * radius + Math.sin(elapsed * 0.7 + noise) * drift.x * 0.25;
+        atom.position.y = base.y + Math.sin(elapsed * speed * 0.85 + offset) * radius + Math.cos(elapsed * 0.6 + noise) * drift.y * 0.25;
+        atom.position.z = base.z + Math.cos(elapsed * speed + offset) * radius * 0.6 + Math.sin(elapsed * 0.5 + noise * 0.5) * drift.z * 0.25;
 
-        atom.position.x =
-          base.x + Math.sin(elapsed * speed + index) * radius + Math.sin(elapsed * 0.7 + noise) * drift.x * sway;
-        atom.position.y =
-          base.y + Math.sin(elapsed * speed * 0.85 + offset) * radius + Math.cos(elapsed * 0.6 + noise) * drift.y * sway;
-        atom.position.z =
-          base.z + Math.cos(elapsed * speed + offset) * radius * 0.6 + Math.sin(elapsed * 0.5 + noise * 0.5) * drift.z * sway;
-
-        const scalePulse = 1 + Math.sin(elapsed * 0.9 + offset) * 0.04 + currentLevel * 0.05;
+        const scalePulse = 1 + Math.sin(elapsed * 0.9 + offset) * 0.04;
         atom.scale.setScalar(scalePulse);
-        atom.rotation.y += 0.0015 + currentLevel * 0.001;
+        atom.rotation.y += 0.0015;
 
         if (bubbleMaterials[index]) {
-          bubbleMaterials[index].emissiveIntensity = 0.12 + currentLevel * 0.35;
+          bubbleMaterials[index].emissiveIntensity = 0.12 + Math.abs(Math.sin(elapsed * 0.6)) * 0.25;
         }
 
         if (selectedMeshRef.current && atom.uuid === selectedMeshRef.current.uuid) {
-          bubbleMaterials[index].emissiveIntensity = 0.38 + currentLevel * 0.6;
+          bubbleMaterials[index].emissiveIntensity = 0.38 + Math.abs(Math.sin(elapsed * 0.8)) * 0.35;
         }
       });
 
-      lineMaterial.opacity = 0.2 + Math.sin(elapsed * 0.6) * 0.08 + currentLevel * 0.25;
+      lineMaterial.opacity = 0.2 + Math.sin(elapsed * 0.6) * 0.08;
 
       if (haloRef.current && selectedMeshRef.current) {
         const halo = haloRef.current;
         halo.visible = true;
         halo.position.copy(selectedMeshRef.current.position);
-        const haloPulse = 1.35 + Math.sin(elapsed * 1.8) * 0.08 + currentLevel * 0.35;
+        const haloPulse = 1.35 + Math.sin(elapsed * 1.8) * 0.08;
         halo.scale.setScalar(haloPulse);
-        halo.material.opacity = 0.12 + currentLevel * 0.3;
+        halo.material.opacity = 0.12 + Math.abs(Math.sin(elapsed * 0.7)) * 0.3;
         halo.material.color.setHex(selectedMeshRef.current.userData.meta.color);
       } else if (haloRef.current) {
         haloRef.current.visible = false;
       }
 
-      if (audioDelta > 0.07 && currentLevel > 0.05 && elapsed - lastBurstRef.current > 0.4 && atoms.length) {
+      if (elapsed - lastBurstRef.current > 0.8 && atoms.length) {
         const target = atoms[Math.floor(Math.random() * atoms.length)].position;
         spawnBurst(target);
         lastBurstRef.current = elapsed;
@@ -492,501 +382,238 @@ export default function App() {
         }
       }
 
-      if (focusTargetRef.current && cameraRef.current) {
-        const cameraDistance = cameraRef.current.position.distanceTo(focusTargetRef.current);
-        const targetDistance = controls.target.distanceTo(focusTargetRef.current);
-        const isAligned = cameraDistance < 0.6 && targetDistance < 0.2;
-        if (isAligned !== isReadyToEnterRef.current) {
-          isReadyToEnterRef.current = isAligned;
-          setIsReadyToEnter(isAligned);
-        }
-      } else if (isReadyToEnterRef.current) {
-        isReadyToEnterRef.current = false;
-        setIsReadyToEnter(false);
-      }
-
-      if (selectedMeshRef.current && cameraRef.current && rendererRef.current) {
-        const projected = selectedMeshRef.current.position.clone().project(cameraRef.current);
-        const canvas = rendererRef.current.domElement;
-        const x = (projected.x * 0.5 + 0.5) * canvas.clientWidth;
-        const y = (-projected.y * 0.5 + 0.5) * canvas.clientHeight;
-        const shouldShow =
-          isReadyToEnterRef.current && !modalOpenRef.current && !menuOpenRef.current;
-
-        setEnterButtonPos((prev) => {
-          if (
-            Math.abs(prev.x - x) > 0.5 ||
-            Math.abs(prev.y - y) > 0.5 ||
-            prev.visible !== shouldShow
-          ) {
-            return { x, y, visible: shouldShow };
-          }
-          return prev;
-        });
-      } else {
-        setEnterButtonPos((prev) => (prev.visible ? { ...prev, visible: false } : prev));
-      }
-
-      frameId = requestAnimationFrame(animate);
       controls.update();
       renderer.render(scene, camera);
+      requestAnimationFrame(animate);
     };
+
     animate();
+    handleResize();
 
     return () => {
       renderer.domElement.removeEventListener('touchstart', onTouch);
       renderer.domElement.removeEventListener('mousedown', onTouch);
       window.removeEventListener('resize', handleResize);
-      if (frameId) cancelAnimationFrame(frameId);
-      controls.dispose();
       starGeometry.dispose();
       starMaterial.dispose();
       geometry.dispose();
+      bubbleMaterials.forEach((mat) => mat.dispose());
       lineGeom.dispose();
       lineMaterial.dispose();
-      haloGeometry.dispose();
-      haloMaterial.dispose();
-      bubbleMaterials.forEach((material) => material.dispose());
-      bursts.forEach((burst) => {
-        particleGroup.remove(burst.points);
-        burst.burstGeometry.dispose();
-        burst.burstMaterial.dispose();
-      });
-      scene.remove(particleGroup, links, stars, ambientLight, mainLight, halo, ...atoms);
       renderer.dispose();
-      if (mountRef.current?.contains(renderer.domElement)) {
-        mountRef.current.removeChild(renderer.domElement);
-      }
-      cameraRef.current = null;
     };
-  }, []);
+  }, [bubbles]);
 
   useEffect(() => {
-    menuOpenRef.current = isMenuOpen;
-    modalOpenRef.current = isModalOpen;
-    setIsTouchOnUi(isMenuOpen || isModalOpen);
-  }, [isMenuOpen, isModalOpen]);
+    if (!interiorContainerRef.current) return undefined;
 
-  useEffect(() => {
-    isReadyToEnterRef.current = isReadyToEnter;
-  }, [isReadyToEnter]);
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(
+      60,
+      interiorContainerRef.current.clientWidth / interiorContainerRef.current.clientHeight,
+      0.1,
+      100,
+    );
+    camera.position.set(0, 1.2, 4);
 
-  useEffect(() => {
-    const prefersUi = isTouchOnUi;
-    if (controlsRef.current) {
-      controlsRef.current.enabled = !prefersUi;
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    renderer.setSize(interiorContainerRef.current.clientWidth, interiorContainerRef.current.clientHeight);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    interiorContainerRef.current.appendChild(renderer.domElement);
+
+    const cubeLoader = new THREE.CubeTextureLoader();
+    scene.background = cubeLoader.load([
+      'https://threejs.org/examples/textures/cube/Bridge2/posx.jpg',
+      'https://threejs.org/examples/textures/cube/Bridge2/negx.jpg',
+      'https://threejs.org/examples/textures/cube/Bridge2/posy.jpg',
+      'https://threejs.org/examples/textures/cube/Bridge2/negy.jpg',
+      'https://threejs.org/examples/textures/cube/Bridge2/posz.jpg',
+      'https://threejs.org/examples/textures/cube/Bridge2/negz.jpg',
+    ]);
+
+    const interiorAmbient = new THREE.AmbientLight(0xffffff, 0.8);
+    scene.add(interiorAmbient);
+    const interiorPoint = new THREE.PointLight(0xffffff, 1.2, 12);
+    interiorPoint.position.set(2.5, 2.5, 3.5);
+    scene.add(interiorPoint);
+
+    const particlesGeom = new THREE.BufferGeometry();
+    const particleCount = 500;
+    const particlePositions = new Float32Array(particleCount * 3);
+    for (let i = 0; i < particleCount; i += 1) {
+      particlePositions[i * 3] = THREE.MathUtils.randFloatSpread(8);
+      particlePositions[i * 3 + 1] = THREE.MathUtils.randFloatSpread(4);
+      particlePositions[i * 3 + 2] = THREE.MathUtils.randFloatSpread(8);
     }
+    particlesGeom.setAttribute('position', new THREE.Float32BufferAttribute(particlePositions, 3));
+    const particlesMat = new THREE.PointsMaterial({
+      color: 0x7cf7ff,
+      size: 0.04,
+      transparent: true,
+      opacity: 0.65,
+      depthWrite: false,
+    });
+    const particles = new THREE.Points(particlesGeom, particlesMat);
+    scene.add(particles);
 
-    const canvas = rendererRef.current?.domElement;
-    if (canvas) {
-      canvas.style.pointerEvents = prefersUi ? 'none' : 'auto';
-      canvas.style.touchAction = prefersUi ? 'auto' : 'none';
-    }
-  }, [isTouchOnUi]);
+    const createTextMesh = (text, color = '#ffffff') => {
+      const canvas = document.createElement('canvas');
+      canvas.width = 512;
+      canvas.height = 256;
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = 'rgba(0,0,0,0)';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.fillStyle = color;
+      ctx.font = 'bold 48px Inter, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(text, canvas.width / 2, canvas.height / 2);
 
-  useEffect(() => {
-    const audioEl = audioRef.current;
-    if (!audioEl) return undefined;
-
-    const handlePlay = async () => {
-      await ensureAudioNodes();
-      setIsAudioActive(true);
+      const texture = new THREE.CanvasTexture(canvas);
+      texture.needsUpdate = true;
+      const material = new THREE.MeshBasicMaterial({ map: texture, transparent: true });
+      const geometry = new THREE.PlaneGeometry(2.8, 1.4);
+      return new THREE.Mesh(geometry, material);
     };
 
-    const handlePause = () => setIsAudioActive(false);
-    const handleEnded = () => setIsAudioActive(false);
-    const handleError = () => {
-      setIsAudioActive(false);
-      setAudioError("Impossible de lire ce flux audio. Vérifiez l'URL, le fichier ou réessayez.");
+    const textMesh = createTextMesh('Choisissez une bulle');
+    textMesh.position.set(0, 1.4, 0);
+    scene.add(textMesh);
+
+    const video = document.createElement('video');
+    video.src = 'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4';
+    video.loop = true;
+    video.muted = true;
+    video.playsInline = true;
+
+    const videoTexture = new THREE.VideoTexture(video);
+    videoTexture.minFilter = THREE.LinearFilter;
+    videoTexture.magFilter = THREE.LinearFilter;
+    const videoMaterial = new THREE.MeshBasicMaterial({ map: videoTexture, side: THREE.DoubleSide, transparent: true, opacity: 0.9 });
+    const videoPlane = new THREE.Mesh(new THREE.PlaneGeometry(2.8, 1.6), videoMaterial);
+    videoPlane.position.set(0, 0.1, -1.6);
+    scene.add(videoPlane);
+
+    interiorSceneRef.current = scene;
+    interiorCameraRef.current = camera;
+    interiorRendererRef.current = renderer;
+    interiorObjectsRef.current = {
+      textMesh,
+      particles,
+      videoMesh: videoPlane,
+      videoEl: video,
     };
 
-    audioEl.addEventListener('play', handlePlay);
-    audioEl.addEventListener('pause', handlePause);
-    audioEl.addEventListener('ended', handleEnded);
-    audioEl.addEventListener('error', handleError);
+    const handleResize = () => {
+      if (!interiorContainerRef.current) return;
+      const { clientWidth: w, clientHeight: h } = interiorContainerRef.current;
+      camera.aspect = w / h;
+      camera.updateProjectionMatrix();
+      renderer.setSize(w, h);
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    };
+
+    const clock = new THREE.Clock();
+    const animate = () => {
+      const elapsed = clock.getElapsedTime();
+      particles.rotation.y = elapsed * 0.08;
+      textMesh.position.y = 1.4 + Math.sin(elapsed * 1.3) * 0.12;
+      videoPlane.position.y = 0.1 + Math.sin(elapsed * 0.9) * 0.08;
+      renderer.render(scene, camera);
+      requestAnimationFrame(animate);
+    };
+
+    animate();
+    window.addEventListener('resize', handleResize);
+    handleResize();
 
     return () => {
-      audioEl.removeEventListener('play', handlePlay);
-      audioEl.removeEventListener('pause', handlePause);
-      audioEl.removeEventListener('ended', handleEnded);
-      audioEl.removeEventListener('error', handleError);
+      window.removeEventListener('resize', handleResize);
+      particlesGeom.dispose();
+      particlesMat.dispose();
+      videoTexture.dispose();
+      renderer.dispose();
     };
   }, []);
 
   useEffect(() => {
-    if (!currentAudioUrl) return;
-    const audioEl = audioRef.current;
-    if (!audioEl) return;
-    const startAudio = async () => {
-      try {
-        setAudioError('');
-        audioEl.pause();
-        audioEl.currentTime = 0;
-        audioEl.load();
-        await ensureAudioNodes();
-        await audioEl.play();
-        setIsAudioActive(true);
-      } catch (error) {
-        // If autoplay is blocked or the URL fails, keep UI calm and inform the user subtly
-        setIsAudioActive(false);
-        setAudioError("Impossible de lire ce flux audio. Vérifiez l'URL ou réessayez.");
-      }
-    };
+    if (!selectedBubble || !interiorSceneRef.current || !interiorObjectsRef.current) return;
 
-    startAudio();
-  }, [currentAudioUrl]);
+    const { textMesh, particles, videoMesh, videoEl } = interiorObjectsRef.current;
 
-  const currentPlaylist = selectedBubble?.playlist || [];
-
-  useEffect(() => {
-    setCarouselIndex(0);
-    if (!selectedBubble) {
-      focusTargetRef.current = null;
-      selectedMeshRef.current = null;
+    if (textMesh) {
+      textMesh.material.map.dispose();
+      textMesh.material.dispose();
+      textMesh.geometry.dispose();
+      interiorSceneRef.current.remove(textMesh);
+      const updated = (() => {
+        const canvas = document.createElement('canvas');
+        canvas.width = 512;
+        canvas.height = 256;
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = 'rgba(0,0,0,0)';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = '#e8f7ff';
+        ctx.font = 'bold 46px Inter, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(selectedBubble.title, canvas.width / 2, canvas.height / 2);
+        const texture = new THREE.CanvasTexture(canvas);
+        texture.needsUpdate = true;
+        const material = new THREE.MeshBasicMaterial({ map: texture, transparent: true });
+        const geometry = new THREE.PlaneGeometry(3, 1.3);
+        const mesh = new THREE.Mesh(geometry, material);
+        mesh.position.set(0, 1.4, 0);
+        return mesh;
+      })();
+      interiorSceneRef.current.add(updated);
+      interiorObjectsRef.current.textMesh = updated;
     }
-    isReadyToEnterRef.current = false;
-    setIsReadyToEnter(false);
+
+    if (particles) {
+      particles.material.color = new THREE.Color(selectedBubble.color);
+    }
+
+    if (videoMesh && videoEl) {
+      const videoItem = selectedBubble.playlist.find((item) => item.url.endsWith('.mp4'));
+      videoEl.src = videoItem ? videoItem.url : 'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4';
+      videoEl.play().catch(() => {});
+      videoMesh.material.opacity = 0.92;
+    }
   }, [selectedBubble]);
 
-  useEffect(() => {
-    if (!carouselRef.current) return;
-    const targetCard = carouselRef.current.querySelector(`[data-index='${carouselIndex}']`);
-    if (targetCard?.scrollIntoView) {
-      targetCard.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
-    }
-  }, [carouselIndex]);
-
-  const openModalForSelection = () => {
-    if (!selectedBubble) return;
-    setActiveMediaUrl((prev) => prev || currentPlaylist[0]?.url || '');
-    setIsModalOpen(true);
-    setIsMenuOpen(false);
-  };
-
-  const renderMedia = (url) => {
-    if (!url) return null;
-    const lower = url.toLowerCase();
-    if (lower.match(/\.(mp4|webm)$/)) {
-      return <video src={url} controls className="media-frame" />;
-    }
-    if (lower.match(/\.(mp3|wav|ogg)$/)) {
-      return (
-        <audio controls className="media-audio">
-          <source src={url} />
-        </audio>
-      );
-    }
-    if (lower.match(/\.(png|jpg|jpeg|gif|webp)$/)) {
-      return <img src={url} alt="contenu lié" className="media-image" />;
-    }
-    return <iframe title="Ressource" src={url} className="media-frame" />;
-  };
-
-  const handleAudioSubmit = async (event) => {
-    event.preventDefault();
-    const trimmed = audioUrlInput.trim();
-    if (!trimmed) return;
-    setAudioError('');
-    setCurrentAudioUrl((prev) =>
-      prev === trimmed ? `${trimmed}${trimmed.includes('?') ? '&' : '?'}t=${Date.now()}` : trimmed,
-    );
-    if (localAudioObjectUrl) {
-      URL.revokeObjectURL(localAudioObjectUrl);
-      setLocalAudioObjectUrl('');
-    }
-    await ensureAudioNodes();
-  };
-
-  const handleFilePick = () => {
-    fileInputRef.current?.click();
-  };
-
-  const handleFileChange = (event) => {
-    const [file] = event.target.files || [];
-    if (!file) return;
-    if (!file.type.startsWith('audio/')) {
-      setAudioError('Le fichier doit être un audio (.mp3, .wav, .ogg).');
-      return;
-    }
-
-    if (localAudioObjectUrl) {
-      URL.revokeObjectURL(localAudioObjectUrl);
-    }
-
-    const objectUrl = URL.createObjectURL(file);
-    setLocalAudioObjectUrl(objectUrl);
-    setAudioUrlInput(file.name);
-    setAudioError('');
-    setCurrentAudioUrl(objectUrl);
-    // allow re-importing the same file later
-    if (event.target) {
-      // eslint-disable-next-line no-param-reassign
-      event.target.value = '';
-    }
-  };
-
-  useEffect(() => () => {
-    if (localAudioObjectUrl) {
-      URL.revokeObjectURL(localAudioObjectUrl);
-    }
-  }, [localAudioObjectUrl]);
-
   return (
-    <div ref={mountRef} className={`experience ${isTouchOnUi ? 'ui-focus' : 'scene-focus'}`}>
-      <div className="hud">
-        <button
-          type="button"
-          className={`burger-button ${isMenuOpen ? 'open' : ''}`}
-          aria-label="Ouvrir le menu de contrôle"
-          aria-expanded={isMenuOpen}
-          onClick={() => setIsMenuOpen((open) => !open)}
-        >
-          <span className="burger-lines">
-            <span />
-          </span>
-          <span className="burger-label">Menu</span>
-        </button>
-
-        <div className={`hud-panel ${isMenuOpen ? 'visible' : ''}`}>
-          <div className="hud-block collapsible">
-            <div className="hud-block-head">
-              <div>
-                <p className="hud-kicker">Constellation vivante</p>
-                <p className="hud-title">25 bulles reliées par des fils lumineux</p>
-              </div>
-              <button
-                type="button"
-                className="hud-toggle"
-                onClick={() => setIsIntroOpen((open) => !open)}
-                aria-expanded={isIntroOpen}
-              >
-                {isIntroOpen ? 'replier' : 'déplier'}
-              </button>
-            </div>
-            {isIntroOpen && (
-              <p className="hud-sub">
-                Sélectionnez une bulle pour vous en approcher et ouvrir son contenu transmédia.
-              </p>
-            )}
-          </div>
-
-          <div className="hud-block collapsible">
-            <div className="hud-block-head">
-              <div>
-                <p className="hud-kicker">Accès direct</p>
-                <p className="hud-sub">Liste complète des bulles à ouvrir en un tap.</p>
-              </div>
-              <button
-                type="button"
-                className="hud-toggle"
-                onClick={() => setIsListOpen((open) => !open)}
-                aria-expanded={isListOpen}
-              >
-                {isListOpen ? 'replier' : 'déplier'}
-              </button>
-            </div>
-            {isListOpen && (
-              <div className="bubble-list">
-                {bubbles.map((bubble, index) => (
-                  <button
-                    key={bubble.id}
-                    type="button"
-                    className="bubble-list-item"
-                    onClick={() => focusBubbleById(bubble.id)}
-                  >
-                    <span className="bubble-chip">{index + 1}</span>
-                    <div className="bubble-meta">
-                      <span className="bubble-name">{bubble.title}</span>
-                      <span className="bubble-mini">se rapprocher</span>
-                    </div>
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-
-          <div className="hud-block hud-audio collapsible">
-            <div className="hud-block-head">
-              <div>
-                <p className="hud-kicker">Faire danser le réseau</p>
-                <p className="hud-sub">
-                  Collez une URL mp3 ou importez un fichier audio pour guider la danse audioreactive. Doux et subtil.
-                </p>
-              </div>
-              <div className="hud-head-actions">
-                <div className={`audio-status ${isAudioActive ? 'on' : ''}`} aria-live="polite">
-                  <span className="pulse-dot" />
-                  <span>{isAudioActive ? 'le réseau respire avec le son' : 'en attente de son'}</span>
-                </div>
-                <button
-                  type="button"
-                  className="hud-toggle"
-                  onClick={() => setIsAudioOpen((open) => !open)}
-                  aria-expanded={isAudioOpen}
-                >
-                  {isAudioOpen ? 'replier' : 'déplier'}
-                </button>
-              </div>
-            </div>
-
-            {isAudioOpen && (
-              <>
-                <form className="audio-form" onSubmit={handleAudioSubmit}>
-                  <input
-                    value={audioUrlInput}
-                    onChange={(e) => setAudioUrlInput(e.target.value)}
-                    placeholder="https://.../votre-son.mp3"
-                    className="audio-input"
-                    aria-label="URL audio mp3"
-                  />
-                  <div className="audio-actions">
-                    <button type="button" className="hud-button hud-button-ghost" onClick={handleFilePick}>
-                      importer un mp3
-                    </button>
-                    <button type="submit" className="hud-button hud-button-small">
-                      lancer l'audio
-                    </button>
-                  </div>
-                </form>
-                {audioError && <p className="audio-error">{audioError}</p>}
-                <audio
-                  ref={audioRef}
-                  src={currentAudioUrl}
-                  controls
-                  className="audio-player"
-                  preload="auto"
-                  crossOrigin="anonymous"
-                />
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept="audio/mpeg,audio/mp3,audio/wav,audio/ogg,audio/*"
-                  className="sr-only"
-                  onChange={handleFileChange}
-                />
-              </>
-            )}
-          </div>
-
-          {selectedBubble && (
-            <div className="hud-selection collapsible">
-              <div className="hud-block-head">
-                <div>
-                  <p className="hud-label">Bulle sélectionnée</p>
-                  <p className="hud-name">{selectedBubble.title}</p>
-                </div>
-                <button
-                  type="button"
-                  className="hud-toggle"
-                  onClick={() => setIsSelectionOpen((open) => !open)}
-                  aria-expanded={isSelectionOpen}
-                >
-                  {isSelectionOpen ? 'replier' : 'déplier'}
-                </button>
-              </div>
-
-              {isSelectionOpen && (
-                <p className="hud-sub">
-                  Approchez-vous puis appuyez sur le bouton « entrer » qui se dépose sur la bulle
-                  sélectionnée.
-                </p>
-              )}
-            </div>
-          )}
-
-          {selectedBubble && isSelectionOpen && currentPlaylist.length > 0 && (
-            <div className="hud-carousel">
-              <div className="carousel-head">
-                <p className="hud-label">Playlist transmédia</p>
-                <div className="carousel-controls">
-                  <button
-                    type="button"
-                    className="carousel-nav"
-                    onClick={() =>
-                      setCarouselIndex((prev) =>
-                        (prev - 1 + currentPlaylist.length) % currentPlaylist.length,
-                      )
-                    }
-                    aria-label="Précédent"
-                  >
-                    ‹
-                  </button>
-                  <button
-                    type="button"
-                    className="carousel-nav"
-                    onClick={() => setCarouselIndex((prev) => (prev + 1) % currentPlaylist.length)}
-                    aria-label="Suivant"
-                  >
-                    ›
-                  </button>
-                </div>
-              </div>
-              <div className="carousel-window" ref={carouselRef}>
-                {currentPlaylist.map((item, index) => (
-                  <button
-                    key={item.url}
-                    type="button"
-                    data-index={index}
-                    className={`carousel-card ${carouselIndex === index ? 'active' : ''}`}
-                    onClick={() => {
-                      setCarouselIndex(index);
-                      setActiveMediaUrl(item.url);
-                    }}
-                  >
-                    <span className="bubble-mini">#{index + 1}</span>
-                    <span className="carousel-title">{item.label}</span>
-                    <span className="bubble-mini">voir / écouter</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
+    <div className="experience">
+      <div className="scene-area" ref={sceneContainerRef}>
+        <div className="scene-label">
+          <p className="hud-kicker">Réseau vivant</p>
+          <p className="hud-title">Tapotez deux fois une bulle pour plonger dedans.</p>
         </div>
+        <div ref={networkCanvasRef} className="scene-canvas" />
+        {selectedBubble && (
+          <div className="scene-selection">
+            <span className="bubble-chip">{selectedBubble.id}</span>
+            <span className="bubble-name">{selectedBubble.title}</span>
+          </div>
+        )}
       </div>
-
-      {enterButtonPos.visible && (
-        <div
-          className="enter-cta"
-          style={{ left: `${enterButtonPos.x}px`, top: `${enterButtonPos.y}px` }}
-        >
-          <button type="button" className="enter-button" onClick={openModalForSelection}>
-            entrer
+      <div className="interior-area">
+        <div className="interior-head">
+          <p className="hud-label">Intérieur de la bulle</p>
+          <p className="hud-sub">
+            Skybox, particules lentes, texte flottant et plan vidéo apparaissent dès qu'une bulle est sélectionnée.
+          </p>
+        </div>
+        <div className="interior-view" ref={interiorContainerRef} />
+        <div className="interior-actions">
+          <button type="button" className="hud-button" onClick={() => focusBubbleById('bulle-1')}>
+            revenir à la première bulle
+          </button>
+          <button type="button" className="hud-button hud-button-ghost" onClick={() => setSelectedBubble(null)}>
+            vider la sélection
           </button>
         </div>
-      )}
-
-      {isModalOpen && selectedBubble && (
-        <div className="modal-overlay" role="dialog" aria-modal="true">
-          <div className="modal">
-            <div className="modal-header">
-              <div>
-                <p className="modal-kicker">Bulle</p>
-                <p className="modal-title">{selectedBubble.title}</p>
-              </div>
-              <button type="button" className="close" onClick={() => setIsModalOpen(false)}>
-                fermer
-              </button>
-            </div>
-
-            <div className="modal-body">
-              <div className="modal-player">{renderMedia(activeMediaUrl)}</div>
-              <div className="modal-playlist" aria-label="Playlist de liens">
-                {currentPlaylist.map((item) => (
-                  <button
-                    key={item.url}
-                    type="button"
-                    className={`playlist-item ${activeMediaUrl === item.url ? 'active' : ''}`}
-                    onClick={() => setActiveMediaUrl(item.url)}
-                  >
-                    <span className="dot" />
-                    <span>{item.label}</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+      </div>
     </div>
   );
 }
