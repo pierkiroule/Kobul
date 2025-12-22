@@ -26,7 +26,13 @@ export default function App() {
   const [carouselIndex, setCarouselIndex] = useState(0);
   const [sceneHeight, setSceneHeight] = useState(0);
   const [sceneSize, setSceneSize] = useState({ width: 0, height: 0 });
-  const [enterAnchor, setEnterAnchor] = useState({ x: 0, y: 0, visible: false });
+  const [enterAnchor, setEnterAnchor] = useState({
+    x: 0,
+    y: 0,
+    visible: false,
+    clamped: false,
+    direction: 'center',
+  });
 
   const audioRef = useRef(null);
   const audioContextRef = useRef(null);
@@ -579,22 +585,47 @@ export default function App() {
 
         const width = sceneSize.width || rendererRef.current?.domElement.clientWidth || 1;
         const height = sceneSize.height || rendererRef.current?.domElement.clientHeight || 1;
-        const x = (vector.x * 0.5 + 0.5) * width;
-        const y = (-vector.y * 0.5 + 0.5) * height;
+
+        if (width === 0 || height === 0) {
+          frameId = requestAnimationFrame(updateAnchor);
+          return;
+        }
+
+        const rawX = (vector.x * 0.5 + 0.5) * width;
+        const rawY = (-vector.y * 0.5 + 0.5) * height;
         const visible = vector.z > -1 && vector.z < 1;
+
+        const padding = 16;
+        const clampedX = Math.min(Math.max(rawX, padding), width - padding);
+        const clampedY = Math.min(Math.max(rawY, padding), height - padding);
+        const clamped = clampedX !== rawX || clampedY !== rawY;
+
+        const directionParts = [];
+        if (rawY < padding) directionParts.push('up');
+        if (rawY > height - padding) directionParts.push('down');
+        if (rawX < padding) directionParts.push('left');
+        if (rawX > width - padding) directionParts.push('right');
+
+        const direction = directionParts.length ? directionParts.join('-') : 'center';
 
         setEnterAnchor((prev) => {
           if (!visible && !prev.visible) return prev;
-          if (!visible) return { ...prev, visible: false };
+          if (!visible) return { ...prev, visible: false, clamped: false, direction: 'center' };
 
-          if (Math.abs(prev.x - x) > 1 || Math.abs(prev.y - y) > 1 || prev.visible !== visible) {
-            return { x, y, visible };
+          if (
+            Math.abs(prev.x - clampedX) > 1 ||
+            Math.abs(prev.y - clampedY) > 1 ||
+            prev.visible !== visible ||
+            prev.clamped !== clamped ||
+            prev.direction !== direction
+          ) {
+            return { x: clampedX, y: clampedY, visible, clamped, direction };
           }
 
           return prev;
         });
       } else {
-        setEnterAnchor((prev) => (prev.visible ? { ...prev, visible: false } : prev));
+        setEnterAnchor((prev) => (prev.visible ? { ...prev, visible: false, clamped: false } : prev));
       }
 
       frameId = requestAnimationFrame(updateAnchor);
@@ -787,11 +818,20 @@ export default function App() {
 
         {selectedBubble && isReadyToEnter && !isModalOpen && enterAnchor.visible && (
           <div
-            className="enter-cta"
+            className={`enter-cta ${enterAnchor.clamped ? 'clamped' : ''}`}
+            data-direction={enterAnchor.direction}
             style={{ left: `${enterAnchor.x}px`, top: `${enterAnchor.y}px` }}
           >
             <button type="button" className="enter-button" onClick={openModalForSelection}>
-              entrer
+              <span className="enter-label">entrer</span>
+              {enterAnchor.clamped && (
+                <>
+                  <span className="enter-indicator" aria-hidden="true">
+                    ➜
+                  </span>
+                  <span className="sr-only">La bulle est en bord de cadre, suivre la flèche.</span>
+                </>
+              )}
             </button>
           </div>
         )}
