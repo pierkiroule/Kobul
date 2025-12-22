@@ -4,11 +4,10 @@
   color-scheme: dark;
   --bg1: #05060c;
   --bg2: #02030a;
-  --ui: rgba(255, 255, 255, 0.1);
-  --ui2: rgba(255, 255, 255, 0.16);
-  --txt: rgba(240, 245, 255, 0.92);
-  --muted: rgba(240, 245, 255, 0.65);
-  --glow: #b7d3ff;
+  --panel: rgba(255, 255, 255, 0.04);
+  --border: rgba(255, 255, 255, 0.1);
+  --txt: rgba(240, 245, 255, 0.96);
+  --muted: rgba(240, 245, 255, 0.72);
 }
 
 * {
@@ -24,329 +23,42 @@ body {
   overflow: hidden;
 }
 
-#root,
-.shell {
+#root {
   min-height: 100vh;
 }
 
-.shell {
+.scene-shell {
   position: relative;
   width: 100%;
   height: 100vh;
   background: linear-gradient(180deg, rgba(10, 12, 20, 0.9) 0%, rgba(5, 7, 13, 0.95) 50%, rgba(5, 7, 13, 0.98) 100%);
 }
 
-.ui {
-  position: fixed;
-  left: 12px;
-  right: 12px;
-  top: 12px;
-  display: flex;
-  gap: 10px;
-  align-items: center;
-  justify-content: space-between;
-  pointer-events: none;
-  z-index: 3;
+.scene-shell canvas {
+  display: block;
 }
 
-.title {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 10px 12px;
-  border: 1px solid var(--ui2);
-  background: rgba(10, 12, 20, 0.45);
+.scene-overlay {
+  position: absolute;
+  top: 14px;
+  left: 14px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--panel);
   backdrop-filter: blur(8px);
-  border-radius: 14px;
-  pointer-events: none;
-  min-width: 180px;
-}
-
-.label {
-  color: var(--txt);
-  font-size: 14px;
-  letter-spacing: 0.3px;
-  font-weight: 600;
-}
-
-.meta {
-  color: var(--muted);
-  font-size: 12px;
-}
-
-.panel {
-  pointer-events: auto;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 10px 12px;
-  border: 1px solid var(--ui2);
-  background: rgba(10, 12, 20, 0.55);
-  backdrop-filter: blur(8px);
-  border-radius: 14px;
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
 }
 
-.panel.solo {
-  gap: 14px;
-}
-
-.panel.insights {
-  flex-direction: column;
-  align-items: flex-start;
-  min-width: 260px;
-  max-width: 520px;
-}
-
-.panel.brush {
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 8px;
-  min-width: 320px;
-}
-
-.insights-head {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.insights-facts {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-  gap: 10px;
-  width: 100%;
-}
-
-.fact {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 8px 10px;
-  border: 1px solid var(--ui);
-  border-radius: 12px;
-  background: rgba(255, 255, 255, 0.04);
-}
-
-.fact-label {
-  color: var(--muted);
-  font-size: 12px;
-}
-
-.fact-value {
-  font-weight: 600;
-  letter-spacing: 0.2px;
-}
-
-.insight-note {
-  width: 100%;
-  border-radius: 12px;
-  padding: 10px 12px;
-  font-size: 13px;
-}
-
-.insight-note ul {
-  margin: 6px 0 0;
-  padding-left: 16px;
-  color: var(--txt);
-}
-
-.insight-note.warn {
-  border: 1px solid rgba(255, 184, 122, 0.4);
-  background: rgba(255, 184, 122, 0.1);
-}
-
-.insight-note.ok {
-  border: 1px solid rgba(125, 199, 255, 0.4);
-  background: rgba(125, 199, 255, 0.12);
-}
-
-.note-title {
-  color: var(--muted);
-  letter-spacing: 0.2px;
-  margin-bottom: 4px;
-}
-
-.insight-ideas {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.insight-ideas span {
-  padding: 6px 10px;
-  border-radius: 999px;
-  border: 1px solid var(--ui);
-  background: rgba(255, 255, 255, 0.03);
-  font-size: 12px;
-  color: var(--txt);
-}
-
-.brush-head {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.brush-row {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  width: 100%;
-}
-
-.brush-row.sliders {
-  justify-content: space-between;
-  gap: 16px;
-}
-
-.chip-label {
-  color: var(--muted);
-  font-size: 12px;
-  letter-spacing: 0.2px;
-}
-
-.chips {
-  display: flex;
-  gap: 8px;
-}
-
-.chip {
-  width: 32px;
-  height: 32px;
-  border-radius: 10px;
-  border: 2px solid transparent;
-  padding: 0;
-  cursor: pointer;
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.25);
-}
-
-.chip.active {
-  outline: 1px solid var(--txt);
-  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.2), 0 8px 24px rgba(0, 0, 0, 0.35);
-}
-
-.brush-row label {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  color: var(--muted);
-  font-size: 12px;
-  flex: 1;
-}
-
-.brush-row input[type='range'] {
-  width: 100%;
-  accent-color: #b7d3ff;
-}
-
-.brush-actions {
-  width: 100%;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-}
-
-button {
-  appearance: none;
-  border: 1px solid var(--ui2);
-  background: rgba(255, 255, 255, 0.08);
-  color: var(--txt);
-  padding: 10px 12px;
-  border-radius: 12px;
-  font-weight: 600;
-  letter-spacing: 0.2px;
-  cursor: pointer;
-  transition: transform 0.05s ease, background 0.15s ease;
-}
-
-button:active {
-  transform: translateY(1px);
-  background: rgba(255, 255, 255, 0.12);
-}
-
-.subtitle-lines {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  color: var(--muted);
-  font-size: 13px;
-}
-
-.canvas-wrap {
-  position: fixed;
-  inset: 0;
-  overflow: hidden;
-}
-
-.canvas-wrap canvas,
-.canvas-wrap a-scene {
-  position: absolute;
-  inset: 0;
-  outline: none;
-}
-
-.canvas-wrap a-scene canvas {
-  width: 100% !important;
-  height: 100% !important;
-}
-
-.loading {
-  position: absolute;
-  inset: 0;
-  display: grid;
-  place-items: center;
-  color: var(--muted);
+.label {
   font-size: 14px;
-  letter-spacing: 0.02em;
+  letter-spacing: 0.3px;
+  font-weight: 600;
+  color: var(--txt);
 }
 
 .hint {
-  position: fixed;
-  left: 12px;
-  bottom: 12px;
-  padding: 10px 12px;
-  border: 1px solid var(--ui2);
-  background: rgba(10, 12, 20, 0.45);
-  backdrop-filter: blur(8px);
-  border-radius: 14px;
+  margin-top: 4px;
   color: var(--muted);
   font-size: 12px;
-  max-width: min(520px, calc(100vw - 24px));
-  pointer-events: none;
-  line-height: 1.35;
-}
-
-.poem {
-  position: fixed;
-  left: 50%;
-  top: 50%;
-  transform: translate(-50%, -50%);
-  color: rgba(245, 250, 255, 0.92);
-  font-size: 18px;
-  letter-spacing: 0.4px;
-  text-align: center;
-  padding: 12px 14px;
-  border-radius: 14px;
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  background: rgba(10, 12, 20, 0.35);
-  backdrop-filter: blur(10px);
-  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.35);
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 220ms ease, transform 220ms ease;
-  white-space: pre-line;
-  z-index: 3;
-}
-
-.poem.show {
-  opacity: 1;
-  transform: translate(-50%, -55%);
-}
-
-@media (min-width: 900px) {
-  .panel {
-    gap: 14px;
-  }
 }
