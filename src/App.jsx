@@ -22,6 +22,7 @@ export default function App() {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isTouchOnUi, setIsTouchOnUi] = useState(false);
   const [isReadyToEnter, setIsReadyToEnter] = useState(false);
+  const [enterButtonPos, setEnterButtonPos] = useState({ x: 0, y: 0, visible: false });
   const [carouselIndex, setCarouselIndex] = useState(0);
 
   const audioRef = useRef(null);
@@ -504,6 +505,28 @@ export default function App() {
         setIsReadyToEnter(false);
       }
 
+      if (selectedMeshRef.current && cameraRef.current && rendererRef.current) {
+        const projected = selectedMeshRef.current.position.clone().project(cameraRef.current);
+        const canvas = rendererRef.current.domElement;
+        const x = (projected.x * 0.5 + 0.5) * canvas.clientWidth;
+        const y = (-projected.y * 0.5 + 0.5) * canvas.clientHeight;
+        const shouldShow =
+          isReadyToEnterRef.current && !modalOpenRef.current && !menuOpenRef.current;
+
+        setEnterButtonPos((prev) => {
+          if (
+            Math.abs(prev.x - x) > 0.5 ||
+            Math.abs(prev.y - y) > 0.5 ||
+            prev.visible !== shouldShow
+          ) {
+            return { x, y, visible: shouldShow };
+          }
+          return prev;
+        });
+      } else {
+        setEnterButtonPos((prev) => (prev.visible ? { ...prev, visible: false } : prev));
+      }
+
       frameId = requestAnimationFrame(animate);
       controls.update();
       renderer.render(scene, camera);
@@ -769,12 +792,12 @@ export default function App() {
                     key={bubble.id}
                     type="button"
                     className="bubble-list-item"
-                    onClick={() => focusBubbleById(bubble.id, { openModal: true })}
+                    onClick={() => focusBubbleById(bubble.id)}
                   >
                     <span className="bubble-chip">{index + 1}</span>
                     <div className="bubble-meta">
                       <span className="bubble-name">{bubble.title}</span>
-                      <span className="bubble-mini">ouvrir le transmédia</span>
+                      <span className="bubble-mini">se rapprocher</span>
                     </div>
                   </button>
                 ))}
@@ -863,13 +886,10 @@ export default function App() {
               </div>
 
               {isSelectionOpen && (
-                <button
-                  type="button"
-                  className="hud-button"
-                  onClick={openModalForSelection}
-                >
-                  afficher son contenu transmédia
-                </button>
+                <p className="hud-sub">
+                  Approchez-vous puis appuyez sur le bouton « entrer » qui se dépose sur la bulle
+                  sélectionnée.
+                </p>
               )}
             </div>
           )}
@@ -911,7 +931,6 @@ export default function App() {
                     onClick={() => {
                       setCarouselIndex(index);
                       setActiveMediaUrl(item.url);
-                      setIsModalOpen(true);
                     }}
                   >
                     <span className="bubble-mini">#{index + 1}</span>
@@ -925,10 +944,13 @@ export default function App() {
         </div>
       </div>
 
-      {selectedBubble && isReadyToEnter && !isModalOpen && (
-        <div className="enter-cta">
+      {enterButtonPos.visible && (
+        <div
+          className="enter-cta"
+          style={{ left: `${enterButtonPos.x}px`, top: `${enterButtonPos.y}px` }}
+        >
           <button type="button" className="enter-button" onClick={openModalForSelection}>
-            enter
+            entrer
           </button>
         </div>
       )}
