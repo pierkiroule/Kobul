@@ -18,6 +18,7 @@ export default function App() {
   const [isIntroOpen, setIsIntroOpen] = useState(true);
   const [isAudioOpen, setIsAudioOpen] = useState(true);
   const [isSelectionOpen, setIsSelectionOpen] = useState(true);
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
 
   const audioRef = useRef(null);
   const audioContextRef = useRef(null);
@@ -560,122 +561,137 @@ export default function App() {
   return (
     <div ref={mountRef} className="experience">
       <div className="hud">
-        <div className="hud-block collapsible">
-          <div className="hud-block-head">
-            <div>
-              <p className="hud-kicker">Constellation vivante</p>
-              <p className="hud-title">25 bulles reliées par des fils lumineux</p>
-            </div>
-            <button
-              type="button"
-              className="hud-toggle"
-              onClick={() => setIsIntroOpen((open) => !open)}
-              aria-expanded={isIntroOpen}
-            >
-              {isIntroOpen ? 'replier' : 'déplier'}
-            </button>
-          </div>
-          {isIntroOpen && (
-            <p className="hud-sub">
-              Sélectionnez une bulle pour vous en approcher et ouvrir son contenu transmédia.
-            </p>
-          )}
-        </div>
+        <button
+          type="button"
+          className={`burger-button ${isMenuOpen ? 'open' : ''}`}
+          aria-label="Ouvrir le menu de contrôle"
+          aria-expanded={isMenuOpen}
+          onClick={() => setIsMenuOpen((open) => !open)}
+        >
+          <span className="burger-lines">
+            <span />
+          </span>
+          <span className="burger-label">Menu</span>
+        </button>
 
-        <div className="hud-block hud-audio collapsible">
-          <div className="hud-block-head">
-            <div>
-              <p className="hud-kicker">Faire danser le réseau</p>
-              <p className="hud-sub">
-                Collez une URL mp3 ou importez un fichier audio pour guider la danse audioreactive. Doux et subtil.
-              </p>
-            </div>
-            <div className="hud-head-actions">
-              <div className={`audio-status ${isAudioActive ? 'on' : ''}`} aria-live="polite">
-                <span className="pulse-dot" />
-                <span>{isAudioActive ? 'le réseau respire avec le son' : 'en attente de son'}</span>
-              </div>
-              <button
-                type="button"
-                className="hud-toggle"
-                onClick={() => setIsAudioOpen((open) => !open)}
-                aria-expanded={isAudioOpen}
-              >
-                {isAudioOpen ? 'replier' : 'déplier'}
-              </button>
-            </div>
-          </div>
-
-          {isAudioOpen && (
-            <>
-              <form className="audio-form" onSubmit={handleAudioSubmit}>
-                <input
-                  value={audioUrlInput}
-                  onChange={(e) => setAudioUrlInput(e.target.value)}
-                  placeholder="https://.../votre-son.mp3"
-                  className="audio-input"
-                  aria-label="URL audio mp3"
-                />
-                <div className="audio-actions">
-                  <button type="button" className="hud-button hud-button-ghost" onClick={handleFilePick}>
-                    importer un mp3
-                  </button>
-                  <button type="submit" className="hud-button hud-button-small">
-                    lancer l'audio
-                  </button>
-                </div>
-              </form>
-              {audioError && <p className="audio-error">{audioError}</p>}
-              <audio
-                ref={audioRef}
-                src={currentAudioUrl}
-                controls
-                className="audio-player"
-                preload="auto"
-                crossOrigin="anonymous"
-              />
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="audio/mpeg,audio/mp3,audio/wav,audio/ogg,audio/*"
-                className="sr-only"
-                onChange={handleFileChange}
-              />
-            </>
-          )}
-        </div>
-
-        {selectedBubble && (
-          <div className="hud-selection collapsible">
+        <div className={`hud-panel ${isMenuOpen ? 'visible' : ''}`}>
+          <div className="hud-block collapsible">
             <div className="hud-block-head">
               <div>
-                <p className="hud-label">Bulle sélectionnée</p>
-                <p className="hud-name">{selectedBubble.title}</p>
+                <p className="hud-kicker">Constellation vivante</p>
+                <p className="hud-title">25 bulles reliées par des fils lumineux</p>
               </div>
               <button
                 type="button"
                 className="hud-toggle"
-                onClick={() => setIsSelectionOpen((open) => !open)}
-                aria-expanded={isSelectionOpen}
+                onClick={() => setIsIntroOpen((open) => !open)}
+                aria-expanded={isIntroOpen}
               >
-                {isSelectionOpen ? 'replier' : 'déplier'}
+                {isIntroOpen ? 'replier' : 'déplier'}
               </button>
             </div>
-
-            {isSelectionOpen && (
-              <button
-                type="button"
-                className="hud-button"
-                onClick={() => {
-                  setIsModalOpen(true);
-                  setActiveMediaUrl(currentPlaylist[0]?.url || '');
-                }}
-              >
-                afficher son contenu transmédia
-              </button>
+            {isIntroOpen && (
+              <p className="hud-sub">
+                Sélectionnez une bulle pour vous en approcher et ouvrir son contenu transmédia.
+              </p>
             )}
           </div>
-        )}
+
+          <div className="hud-block hud-audio collapsible">
+            <div className="hud-block-head">
+              <div>
+                <p className="hud-kicker">Faire danser le réseau</p>
+                <p className="hud-sub">
+                  Collez une URL mp3 ou importez un fichier audio pour guider la danse audioreactive. Doux et subtil.
+                </p>
+              </div>
+              <div className="hud-head-actions">
+                <div className={`audio-status ${isAudioActive ? 'on' : ''}`} aria-live="polite">
+                  <span className="pulse-dot" />
+                  <span>{isAudioActive ? 'le réseau respire avec le son' : 'en attente de son'}</span>
+                </div>
+                <button
+                  type="button"
+                  className="hud-toggle"
+                  onClick={() => setIsAudioOpen((open) => !open)}
+                  aria-expanded={isAudioOpen}
+                >
+                  {isAudioOpen ? 'replier' : 'déplier'}
+                </button>
+              </div>
+            </div>
+
+            {isAudioOpen && (
+              <>
+                <form className="audio-form" onSubmit={handleAudioSubmit}>
+                  <input
+                    value={audioUrlInput}
+                    onChange={(e) => setAudioUrlInput(e.target.value)}
+                    placeholder="https://.../votre-son.mp3"
+                    className="audio-input"
+                    aria-label="URL audio mp3"
+                  />
+                  <div className="audio-actions">
+                    <button type="button" className="hud-button hud-button-ghost" onClick={handleFilePick}>
+                      importer un mp3
+                    </button>
+                    <button type="submit" className="hud-button hud-button-small">
+                      lancer l'audio
+                    </button>
+                  </div>
+                </form>
+                {audioError && <p className="audio-error">{audioError}</p>}
+                <audio
+                  ref={audioRef}
+                  src={currentAudioUrl}
+                  controls
+                  className="audio-player"
+                  preload="auto"
+                  crossOrigin="anonymous"
+                />
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="audio/mpeg,audio/mp3,audio/wav,audio/ogg,audio/*"
+                  className="sr-only"
+                  onChange={handleFileChange}
+                />
+              </>
+            )}
+          </div>
+
+          {selectedBubble && (
+            <div className="hud-selection collapsible">
+              <div className="hud-block-head">
+                <div>
+                  <p className="hud-label">Bulle sélectionnée</p>
+                  <p className="hud-name">{selectedBubble.title}</p>
+                </div>
+                <button
+                  type="button"
+                  className="hud-toggle"
+                  onClick={() => setIsSelectionOpen((open) => !open)}
+                  aria-expanded={isSelectionOpen}
+                >
+                  {isSelectionOpen ? 'replier' : 'déplier'}
+                </button>
+              </div>
+
+              {isSelectionOpen && (
+                <button
+                  type="button"
+                  className="hud-button"
+                  onClick={() => {
+                    setIsModalOpen(true);
+                    setActiveMediaUrl(currentPlaylist[0]?.url || '');
+                  }}
+                >
+                  afficher son contenu transmédia
+                </button>
+              )}
+            </div>
+          )}
+        </div>
       </div>
 
       {isModalOpen && selectedBubble && (
