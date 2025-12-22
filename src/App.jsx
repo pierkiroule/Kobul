@@ -4,7 +4,7 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import gsap from 'gsap';
 
 export default function App() {
-  const mountRef = useRef(null);
+  const sceneContainerRef = useRef(null);
   const [selectedBubble, setSelectedBubble] = useState(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [activeMediaUrl, setActiveMediaUrl] = useState('');
@@ -21,8 +21,12 @@ export default function App() {
   const [isListOpen, setIsListOpen] = useState(true);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isTouchOnUi, setIsTouchOnUi] = useState(false);
+  const [isPilotageHover, setIsPilotageHover] = useState(false);
   const [isReadyToEnter, setIsReadyToEnter] = useState(false);
   const [carouselIndex, setCarouselIndex] = useState(0);
+  const [sceneHeight, setSceneHeight] = useState(0);
+  const [sceneSize, setSceneSize] = useState({ width: 0, height: 0 });
+  const [enterAnchor, setEnterAnchor] = useState({ x: 0, y: 0, visible: false });
 
   const audioRef = useRef(null);
   const audioContextRef = useRef(null);
@@ -163,7 +167,7 @@ export default function App() {
   };
 
   useEffect(() => {
-    if (!mountRef.current) return undefined;
+    if (!sceneContainerRef.current) return undefined;
 
     // Base scene and camera
     const scene = new THREE.Scene();
@@ -171,7 +175,7 @@ export default function App() {
 
     const camera = new THREE.PerspectiveCamera(
       75,
-      window.innerWidth / window.innerHeight,
+      16 / 9,
       0.1,
       1000,
     );
@@ -182,12 +186,23 @@ export default function App() {
       antialias: true,
       powerPreference: 'high-performance',
     });
-    renderer.setSize(window.innerWidth, window.innerHeight);
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    const updateRendererSize = () => {
+      const rect = sceneContainerRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      const width = rect.width;
+      const height = rect.height || 1;
+      setSceneSize({ width, height });
+      setSceneHeight(height);
+      camera.aspect = width / height;
+      camera.updateProjectionMatrix();
+      renderer.setSize(width, height);
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    };
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1.05;
+    sceneContainerRef.current.appendChild(renderer.domElement);
+    updateRendererSize();
     renderer.outputColorSpace = THREE.SRGBColorSpace;
-    mountRef.current.appendChild(renderer.domElement);
     rendererRef.current = renderer;
 
     // Soft lighting for calm visibility
@@ -363,8 +378,10 @@ export default function App() {
       }
 
       const touch = event.touches ? event.touches[0] : event;
-      mouse.x = (touch.clientX / window.innerWidth) * 2 - 1;
-      mouse.y = -(touch.clientY / window.innerHeight) * 2 + 1;
+      const rect = sceneContainerRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      mouse.x = ((touch.clientX - rect.left) / rect.width) * 2 - 1;
+      mouse.y = -((touch.clientY - rect.top) / rect.height) * 2 + 1;
 
       raycaster.setFromCamera(mouse, camera);
       const intersects = raycaster.intersectObjects(atoms);
@@ -383,16 +400,11 @@ export default function App() {
       }
     };
 
-    const handleResize = () => {
-      camera.aspect = window.innerWidth / window.innerHeight;
-      camera.updateProjectionMatrix();
-      renderer.setSize(window.innerWidth, window.innerHeight);
-      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    };
-
     renderer.domElement.addEventListener('touchstart', onTouch, { passive: false });
     renderer.domElement.addEventListener('mousedown', onTouch);
-    window.addEventListener('resize', handleResize);
+    const resizeObserver = new ResizeObserver(updateRendererSize);
+    resizeObserver.observe(sceneContainerRef.current);
+    window.addEventListener('resize', updateRendererSize);
 
     const clock = new THREE.Clock();
     let frameId;
@@ -513,7 +525,8 @@ export default function App() {
     return () => {
       renderer.domElement.removeEventListener('touchstart', onTouch);
       renderer.domElement.removeEventListener('mousedown', onTouch);
-      window.removeEventListener('resize', handleResize);
+      resizeObserver.disconnect();
+      window.removeEventListener('resize', updateRendererSize);
       if (frameId) cancelAnimationFrame(frameId);
       controls.dispose();
       starGeometry.dispose();
@@ -531,8 +544,8 @@ export default function App() {
       });
       scene.remove(particleGroup, links, stars, ambientLight, mainLight, halo, ...atoms);
       renderer.dispose();
-      if (mountRef.current?.contains(renderer.domElement)) {
-        mountRef.current.removeChild(renderer.domElement);
+      if (sceneContainerRef.current?.contains(renderer.domElement)) {
+        sceneContainerRef.current.removeChild(renderer.domElement);
       }
       cameraRef.current = null;
     };
@@ -541,12 +554,50 @@ export default function App() {
   useEffect(() => {
     menuOpenRef.current = isMenuOpen;
     modalOpenRef.current = isModalOpen;
-    setIsTouchOnUi(isMenuOpen || isModalOpen);
-  }, [isMenuOpen, isModalOpen]);
+    setIsTouchOnUi(isMenuOpen || isModalOpen || isPilotageHover);
+  }, [isMenuOpen, isModalOpen, isPilotageHover]);
 
   useEffect(() => {
     isReadyToEnterRef.current = isReadyToEnter;
   }, [isReadyToEnter]);
+
+  useEffect(() => {
+    let frameId;
+
+    const updateAnchor = () => {
+      if (selectedMeshRef.current && cameraRef.current) {
+        const vector = selectedMeshRef.current.position.clone();
+        vector.project(cameraRef.current);
+
+        const width = sceneSize.width || rendererRef.current?.domElement.clientWidth || 1;
+        const height = sceneSize.height || rendererRef.current?.domElement.clientHeight || 1;
+        const x = (vector.x * 0.5 + 0.5) * width;
+        const y = (-vector.y * 0.5 + 0.5) * height;
+        const visible = vector.z > -1 && vector.z < 1;
+
+        setEnterAnchor((prev) => {
+          if (!visible && !prev.visible) return prev;
+          if (!visible) return { ...prev, visible: false };
+
+          if (Math.abs(prev.x - x) > 1 || Math.abs(prev.y - y) > 1 || prev.visible !== visible) {
+            return { x, y, visible };
+          }
+
+          return prev;
+        });
+      } else {
+        setEnterAnchor((prev) => (prev.visible ? { ...prev, visible: false } : prev));
+      }
+
+      frameId = requestAnimationFrame(updateAnchor);
+    };
+
+    frameId = requestAnimationFrame(updateAnchor);
+
+    return () => {
+      if (frameId) cancelAnimationFrame(frameId);
+    };
+  }, [sceneSize.width, sceneSize.height, selectedBubble, isReadyToEnter, sceneHeight]);
 
   useEffect(() => {
     const prefersUi = isTouchOnUi;
@@ -709,229 +760,247 @@ export default function App() {
   }, [localAudioObjectUrl]);
 
   return (
-    <div ref={mountRef} className={`experience ${isTouchOnUi ? 'ui-focus' : 'scene-focus'}`}>
-      <div className="hud">
-        <button
-          type="button"
-          className={`burger-button ${isMenuOpen ? 'open' : ''}`}
-          aria-label="Ouvrir le menu de contrôle"
-          aria-expanded={isMenuOpen}
-          onClick={() => setIsMenuOpen((open) => !open)}
-        >
-          <span className="burger-lines">
-            <span />
-          </span>
-          <span className="burger-label">Menu</span>
-        </button>
+    <div className="layout">
+      <div className="scene" aria-label="Constellation EchoBulle">
+        <div
+          ref={sceneContainerRef}
+          className={`experience ${isTouchOnUi ? 'ui-focus' : 'scene-focus'}`}
+        />
 
-        <div className={`hud-panel ${isMenuOpen ? 'visible' : ''}`}>
-          <div className="hud-block collapsible">
-            <div className="hud-block-head">
-              <div>
-                <p className="hud-kicker">Constellation vivante</p>
-                <p className="hud-title">25 bulles reliées par des fils lumineux</p>
-              </div>
-              <button
-                type="button"
-                className="hud-toggle"
-                onClick={() => setIsIntroOpen((open) => !open)}
-                aria-expanded={isIntroOpen}
-              >
-                {isIntroOpen ? 'replier' : 'déplier'}
-              </button>
-            </div>
-            {isIntroOpen && (
-              <p className="hud-sub">
-                Sélectionnez une bulle pour vous en approcher et ouvrir son contenu transmédia.
-              </p>
-            )}
+        {selectedBubble && isReadyToEnter && !isModalOpen && enterAnchor.visible && (
+          <div
+            className="enter-cta"
+            style={{ left: `${enterAnchor.x}px`, top: `${enterAnchor.y}px` }}
+          >
+            <button type="button" className="enter-button" onClick={openModalForSelection}>
+              entrer
+            </button>
           </div>
-
-          <div className="hud-block collapsible">
-            <div className="hud-block-head">
-              <div>
-                <p className="hud-kicker">Accès direct</p>
-                <p className="hud-sub">Liste complète des bulles à ouvrir en un tap.</p>
-              </div>
-              <button
-                type="button"
-                className="hud-toggle"
-                onClick={() => setIsListOpen((open) => !open)}
-                aria-expanded={isListOpen}
-              >
-                {isListOpen ? 'replier' : 'déplier'}
-              </button>
-            </div>
-            {isListOpen && (
-              <div className="bubble-list">
-                {bubbles.map((bubble, index) => (
-                  <button
-                    key={bubble.id}
-                    type="button"
-                    className="bubble-list-item"
-                    onClick={() => focusBubbleById(bubble.id, { openModal: true })}
-                  >
-                    <span className="bubble-chip">{index + 1}</span>
-                    <div className="bubble-meta">
-                      <span className="bubble-name">{bubble.title}</span>
-                      <span className="bubble-mini">ouvrir le transmédia</span>
-                    </div>
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-
-          <div className="hud-block hud-audio collapsible">
-            <div className="hud-block-head">
-              <div>
-                <p className="hud-kicker">Faire danser le réseau</p>
-                <p className="hud-sub">
-                  Collez une URL mp3 ou importez un fichier audio pour guider la danse audioreactive. Doux et subtil.
-                </p>
-              </div>
-              <div className="hud-head-actions">
-                <div className={`audio-status ${isAudioActive ? 'on' : ''}`} aria-live="polite">
-                  <span className="pulse-dot" />
-                  <span>{isAudioActive ? 'le réseau respire avec le son' : 'en attente de son'}</span>
-                </div>
-                <button
-                  type="button"
-                  className="hud-toggle"
-                  onClick={() => setIsAudioOpen((open) => !open)}
-                  aria-expanded={isAudioOpen}
-                >
-                  {isAudioOpen ? 'replier' : 'déplier'}
-                </button>
-              </div>
-            </div>
-
-            {isAudioOpen && (
-              <>
-                <form className="audio-form" onSubmit={handleAudioSubmit}>
-                  <input
-                    value={audioUrlInput}
-                    onChange={(e) => setAudioUrlInput(e.target.value)}
-                    placeholder="https://.../votre-son.mp3"
-                    className="audio-input"
-                    aria-label="URL audio mp3"
-                  />
-                  <div className="audio-actions">
-                    <button type="button" className="hud-button hud-button-ghost" onClick={handleFilePick}>
-                      importer un mp3
-                    </button>
-                    <button type="submit" className="hud-button hud-button-small">
-                      lancer l'audio
-                    </button>
-                  </div>
-                </form>
-                {audioError && <p className="audio-error">{audioError}</p>}
-                <audio
-                  ref={audioRef}
-                  src={currentAudioUrl}
-                  controls
-                  className="audio-player"
-                  preload="auto"
-                  crossOrigin="anonymous"
-                />
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept="audio/mpeg,audio/mp3,audio/wav,audio/ogg,audio/*"
-                  className="sr-only"
-                  onChange={handleFileChange}
-                />
-              </>
-            )}
-          </div>
-
-          {selectedBubble && (
-            <div className="hud-selection collapsible">
-              <div className="hud-block-head">
-                <div>
-                  <p className="hud-label">Bulle sélectionnée</p>
-                  <p className="hud-name">{selectedBubble.title}</p>
-                </div>
-                <button
-                  type="button"
-                  className="hud-toggle"
-                  onClick={() => setIsSelectionOpen((open) => !open)}
-                  aria-expanded={isSelectionOpen}
-                >
-                  {isSelectionOpen ? 'replier' : 'déplier'}
-                </button>
-              </div>
-
-              {isSelectionOpen && (
-                <button
-                  type="button"
-                  className="hud-button"
-                  onClick={openModalForSelection}
-                >
-                  afficher son contenu transmédia
-                </button>
-              )}
-            </div>
-          )}
-
-          {selectedBubble && isSelectionOpen && currentPlaylist.length > 0 && (
-            <div className="hud-carousel">
-              <div className="carousel-head">
-                <p className="hud-label">Playlist transmédia</p>
-                <div className="carousel-controls">
-                  <button
-                    type="button"
-                    className="carousel-nav"
-                    onClick={() =>
-                      setCarouselIndex((prev) =>
-                        (prev - 1 + currentPlaylist.length) % currentPlaylist.length,
-                      )
-                    }
-                    aria-label="Précédent"
-                  >
-                    ‹
-                  </button>
-                  <button
-                    type="button"
-                    className="carousel-nav"
-                    onClick={() => setCarouselIndex((prev) => (prev + 1) % currentPlaylist.length)}
-                    aria-label="Suivant"
-                  >
-                    ›
-                  </button>
-                </div>
-              </div>
-              <div className="carousel-window" ref={carouselRef}>
-                {currentPlaylist.map((item, index) => (
-                  <button
-                    key={item.url}
-                    type="button"
-                    data-index={index}
-                    className={`carousel-card ${carouselIndex === index ? 'active' : ''}`}
-                    onClick={() => {
-                      setCarouselIndex(index);
-                      setActiveMediaUrl(item.url);
-                      setIsModalOpen(true);
-                    }}
-                  >
-                    <span className="bubble-mini">#{index + 1}</span>
-                    <span className="carousel-title">{item.label}</span>
-                    <span className="bubble-mini">voir / écouter</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
+        )}
       </div>
 
-      {selectedBubble && isReadyToEnter && !isModalOpen && (
-        <div className="enter-cta">
-          <button type="button" className="enter-button" onClick={openModalForSelection}>
-            enter
+      <div
+        className="pilotage"
+        onPointerEnter={() => setIsPilotageHover(true)}
+        onPointerLeave={() => setIsPilotageHover(false)}
+      >
+        <div className="pilotage-head">
+          <div>
+            <p className="hud-kicker">Pilotage</p>
+            <p className="pilotage-title">Guidage doux sans toucher la scène</p>
+          </div>
+          <button
+            type="button"
+            className={`burger-button ${isMenuOpen ? 'open' : ''}`}
+            aria-label="Déplier le pilotage"
+            aria-expanded={isMenuOpen}
+            onClick={() => setIsMenuOpen((open) => !open)}
+          >
+            <span className="burger-lines">
+              <span />
+            </span>
+            <span className="burger-label">{isMenuOpen ? 'fermer' : 'ouvrir'}</span>
           </button>
         </div>
-      )}
+
+        <div className={`hud-panel ${isMenuOpen ? 'visible' : ''}`}>
+          <div className="pilotage-grid">
+            <div className="hud-block collapsible">
+              <div className="hud-block-head">
+                <div>
+                  <p className="hud-kicker">Constellation vivante</p>
+                  <p className="hud-title">25 bulles reliées par des fils lumineux</p>
+                </div>
+                <button
+                  type="button"
+                  className="hud-toggle"
+                  onClick={() => setIsIntroOpen((open) => !open)}
+                  aria-expanded={isIntroOpen}
+                >
+                  {isIntroOpen ? 'replier' : 'déplier'}
+                </button>
+              </div>
+              {isIntroOpen && (
+                <p className="hud-sub">
+                  Sélectionnez une bulle pour vous en approcher et ouvrir son contenu transmédia.
+                </p>
+              )}
+            </div>
+
+            <div className="hud-block collapsible">
+              <div className="hud-block-head">
+                <div>
+                  <p className="hud-kicker">Accès direct</p>
+                  <p className="hud-sub">Liste complète des bulles à ouvrir en un tap.</p>
+                </div>
+                <button
+                  type="button"
+                  className="hud-toggle"
+                  onClick={() => setIsListOpen((open) => !open)}
+                  aria-expanded={isListOpen}
+                >
+                  {isListOpen ? 'replier' : 'déplier'}
+                </button>
+              </div>
+              {isListOpen && (
+                <div className="bubble-list">
+                  {bubbles.map((bubble, index) => (
+                    <button
+                      key={bubble.id}
+                      type="button"
+                      className="bubble-list-item"
+                      onClick={() => focusBubbleById(bubble.id, { openModal: true })}
+                    >
+                      <span className="bubble-chip">{index + 1}</span>
+                      <div className="bubble-meta">
+                        <span className="bubble-name">{bubble.title}</span>
+                        <span className="bubble-mini">ouvrir le transmédia</span>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="hud-block hud-audio collapsible">
+              <div className="hud-block-head">
+                <div>
+                  <p className="hud-kicker">Faire danser le réseau</p>
+                  <p className="hud-sub">
+                    Collez une URL mp3 ou importez un fichier audio pour guider la danse audioreactive. Doux et subtil.
+                  </p>
+                </div>
+                <div className="hud-head-actions">
+                  <div className={`audio-status ${isAudioActive ? 'on' : ''}`} aria-live="polite">
+                    <span className="pulse-dot" />
+                    <span>{isAudioActive ? 'le réseau respire avec le son' : 'en attente de son'}</span>
+                  </div>
+                  <button
+                    type="button"
+                    className="hud-toggle"
+                    onClick={() => setIsAudioOpen((open) => !open)}
+                    aria-expanded={isAudioOpen}
+                  >
+                    {isAudioOpen ? 'replier' : 'déplier'}
+                  </button>
+                </div>
+              </div>
+
+              {isAudioOpen && (
+                <>
+                  <form className="audio-form" onSubmit={handleAudioSubmit}>
+                    <input
+                      value={audioUrlInput}
+                      onChange={(e) => setAudioUrlInput(e.target.value)}
+                      placeholder="https://.../votre-son.mp3"
+                      className="audio-input"
+                      aria-label="URL audio mp3"
+                    />
+                    <div className="audio-actions">
+                      <button type="button" className="hud-button hud-button-ghost" onClick={handleFilePick}>
+                        importer un mp3
+                      </button>
+                      <button type="submit" className="hud-button hud-button-small">
+                        lancer l'audio
+                      </button>
+                    </div>
+                  </form>
+                  {audioError && <p className="audio-error">{audioError}</p>}
+                  <audio
+                    ref={audioRef}
+                    src={currentAudioUrl}
+                    controls
+                    className="audio-player"
+                    preload="auto"
+                    crossOrigin="anonymous"
+                  />
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="audio/mpeg,audio/mp3,audio/wav,audio/ogg,audio/*"
+                    className="sr-only"
+                    onChange={handleFileChange}
+                  />
+                </>
+              )}
+            </div>
+
+            {selectedBubble && (
+              <div className="hud-selection collapsible">
+                <div className="hud-block-head">
+                  <div>
+                    <p className="hud-label">Bulle sélectionnée</p>
+                    <p className="hud-name">{selectedBubble.title}</p>
+                  </div>
+                  <button
+                    type="button"
+                    className="hud-toggle"
+                    onClick={() => setIsSelectionOpen((open) => !open)}
+                    aria-expanded={isSelectionOpen}
+                  >
+                    {isSelectionOpen ? 'replier' : 'déplier'}
+                  </button>
+                </div>
+
+                {isSelectionOpen && (
+                  <button type="button" className="hud-button" onClick={openModalForSelection}>
+                    afficher son contenu transmédia
+                  </button>
+                )}
+              </div>
+            )}
+
+            {selectedBubble && isSelectionOpen && currentPlaylist.length > 0 && (
+              <div className="hud-carousel">
+                <div className="carousel-head">
+                  <p className="hud-label">Playlist transmédia</p>
+                  <div className="carousel-controls">
+                    <button
+                      type="button"
+                      className="carousel-nav"
+                      onClick={() =>
+                        setCarouselIndex((prev) =>
+                          (prev - 1 + currentPlaylist.length) % currentPlaylist.length,
+                        )
+                      }
+                      aria-label="Précédent"
+                    >
+                      ‹
+                    </button>
+                    <button
+                      type="button"
+                      className="carousel-nav"
+                      onClick={() => setCarouselIndex((prev) => (prev + 1) % currentPlaylist.length)}
+                      aria-label="Suivant"
+                    >
+                      ›
+                    </button>
+                  </div>
+                </div>
+                <div className="carousel-window" ref={carouselRef}>
+                  {currentPlaylist.map((item, index) => (
+                    <button
+                      key={item.url}
+                      type="button"
+                      data-index={index}
+                      className={`carousel-card ${carouselIndex === index ? 'active' : ''}`}
+                      onClick={() => {
+                        setCarouselIndex(index);
+                        setActiveMediaUrl(item.url);
+                        setIsModalOpen(true);
+                      }}
+                    >
+                      <span className="bubble-mini">#{index + 1}</span>
+                      <span className="carousel-title">{item.label}</span>
+                      <span className="bubble-mini">voir / écouter</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
 
       {isModalOpen && selectedBubble && (
         <div className="modal-overlay" role="dialog" aria-modal="true">

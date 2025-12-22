@@ -14,16 +14,40 @@ body {
   background-color: #02020a;
 }
 
-#root,
-.experience {
+#root {
+  min-height: 100vh;
+}
+
+.layout {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background-color: #02020a;
+}
+
+.scene {
+  position: relative;
   width: 100%;
-  height: 100vh;
+  flex: 1 1 auto;
+  min-height: 60vh;
+  max-height: 80vh;
+  aspect-ratio: 16 / 9;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+  overflow: hidden;
 }
 
 .experience {
   display: block;
   position: relative;
   overscroll-behavior: contain;
+  width: 100%;
+  height: 100%;
+}
+
+.scene canvas {
+  width: 100% !important;
+  height: 100% !important;
+  display: block;
 }
 
 .experience.scene-focus canvas {
@@ -35,17 +59,31 @@ body {
   touch-action: auto;
 }
 
-.hud {
-  position: fixed;
-  top: 16px;
-  left: 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  pointer-events: none;
+.pilotage {
+  position: relative;
+  background: radial-gradient(circle at 20% 20%, rgba(0, 214, 255, 0.08), transparent 38%),
+    radial-gradient(circle at 80% 10%, rgba(255, 95, 213, 0.08), transparent 40%),
+    rgba(6, 10, 20, 0.92);
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  padding: 18px 16px 20px;
   color: #e8f7ff;
-  mix-blend-mode: screen;
+  backdrop-filter: blur(14px);
+  touch-action: pan-y;
   z-index: 2;
+}
+
+.pilotage-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.pilotage-title {
+  margin: 4px 0 0;
+  font-size: 18px;
+  color: #f2fbff;
 }
 
 .burger-button {
@@ -142,7 +180,7 @@ body {
   opacity: 0;
   transform: translateY(-6px) scale(0.98);
   transition: opacity 160ms ease, transform 180ms ease;
-  max-width: 420px;
+  width: 100%;
 }
 
 .hud-panel.visible {
@@ -155,14 +193,21 @@ body {
   margin: 2px 0;
 }
 
+.pilotage-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 12px;
+  align-items: flex-start;
+}
+
 .hud-block {
   backdrop-filter: blur(8px);
   background: rgba(4, 12, 24, 0.55);
   border: 1px solid rgba(255, 255, 255, 0.1);
   padding: 12px 14px;
   border-radius: 12px;
-  max-width: 380px;
   pointer-events: auto;
+  height: 100%;
 }
 
 .collapsible {
@@ -525,10 +570,8 @@ body {
 }
 
 .enter-cta {
-  position: fixed;
-  left: 50%;
-  bottom: 28px;
-  transform: translateX(-50%);
+  position: absolute;
+  transform: translate(-50%, -50%);
   z-index: 3;
   pointer-events: none;
 }
