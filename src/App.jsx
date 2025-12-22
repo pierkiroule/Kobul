@@ -27,6 +27,9 @@ export default function App() {
     });
     renderer.setSize(window.innerWidth, window.innerHeight);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.05;
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
     mountRef.current.appendChild(renderer.domElement);
 
     // Soft lighting for calm visibility
@@ -53,26 +56,39 @@ export default function App() {
     scene.add(stars);
 
     // Atom cluster
-    const geometry = new THREE.SphereGeometry(1.5, 16, 16);
+    const geometry = new THREE.SphereGeometry(1.5, 32, 32);
     const atoms = [];
+    const bubbleMaterials = [];
 
-    const createAtom = (x, y, z, color) => {
-      const material = new THREE.MeshStandardMaterial({
+    const createBubbleMaterial = (color) =>
+      new THREE.MeshPhysicalMaterial({
         color,
-        roughness: 0.75,
+        roughness: 0.15,
         metalness: 0.05,
-        transparent: true,
-        opacity: 0.85,
+        transmission: 0.8,
+        thickness: 0.8,
+        ior: 1.33,
+        clearcoat: 1,
+        clearcoatRoughness: 0.05,
+        iridescence: 0.25,
+        iridescenceIOR: 1.3,
         emissive: color,
-        emissiveIntensity: 0.18,
+        emissiveIntensity: 0.12,
       });
 
+    const createAtom = (x, y, z, color) => {
+      const material = createBubbleMaterial(color);
       const mesh = new THREE.Mesh(geometry, material);
       mesh.position.set(x, y, z);
+      mesh.userData.basePosition = mesh.position.clone();
+      mesh.userData.floatSpeed = 0.25 + Math.random() * 0.35;
+      mesh.userData.floatRadius = 0.45 + Math.random() * 0.35;
+      mesh.userData.pulseOffset = Math.random() * Math.PI * 2;
       scene.add(mesh);
       atoms.push(mesh);
+      bubbleMaterials.push(material);
 
-      const pointLight = new THREE.PointLight(color, 1.5, 10);
+      const pointLight = new THREE.PointLight(color, 1.35, 8);
       mesh.add(pointLight);
     };
 
@@ -130,8 +146,28 @@ export default function App() {
     window.addEventListener('mousedown', onTouch);
     window.addEventListener('resize', handleResize);
 
+    const clock = new THREE.Clock();
     let frameId;
     const animate = () => {
+      const elapsed = clock.getElapsedTime();
+
+      atoms.forEach((atom, index) => {
+        const speed = atom.userData.floatSpeed;
+        const radius = atom.userData.floatRadius;
+        const base = atom.userData.basePosition;
+        const offset = atom.userData.pulseOffset;
+
+        atom.position.x = base.x + Math.sin(elapsed * speed + index) * radius;
+        atom.position.y = base.y + Math.sin(elapsed * speed * 0.85 + offset) * radius;
+        atom.position.z = base.z + Math.cos(elapsed * speed + offset) * radius * 0.6;
+
+        const scalePulse = 1 + Math.sin(elapsed * 0.9 + offset) * 0.04;
+        atom.scale.setScalar(scalePulse);
+        atom.rotation.y += 0.0015;
+      });
+
+      link.material.opacity = 0.25 + Math.sin(elapsed * 0.6) * 0.08;
+
       frameId = requestAnimationFrame(animate);
       controls.update();
       renderer.render(scene, camera);
@@ -149,6 +185,7 @@ export default function App() {
       geometry.dispose();
       lineGeom.dispose();
       lineMaterial.dispose();
+      bubbleMaterials.forEach((material) => material.dispose());
       scene.remove(link, stars, ambientLight, mainLight, ...atoms);
       renderer.dispose();
       if (mountRef.current?.contains(renderer.domElement)) {
