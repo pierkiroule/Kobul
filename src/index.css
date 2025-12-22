@@ -201,6 +201,105 @@ body {
   align-items: flex-start;
 }
 
+.touch-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.touch-grid-buttons {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+  width: 100%;
+  margin-top: 4px;
+}
+
+.touch-button {
+  position: relative;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.04);
+  color: #e8f7ff;
+  padding: 16px 18px;
+  min-height: 82px;
+  text-align: left;
+  cursor: pointer;
+  transition: transform 160ms ease, border-color 160ms ease, background 160ms ease;
+}
+
+.touch-button:hover {
+  transform: translateY(-1px);
+  border-color: rgba(0, 214, 255, 0.3);
+  background: rgba(0, 214, 255, 0.06);
+}
+
+.touch-button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  border-color: rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.touch-button-primary {
+  border-color: rgba(0, 214, 255, 0.6);
+  background: linear-gradient(120deg, rgba(0, 214, 255, 0.12), rgba(255, 95, 213, 0.14));
+  box-shadow: 0 12px 30px rgba(0, 214, 255, 0.18);
+}
+
+.touch-label {
+  display: block;
+  font-size: 18px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.touch-helpline {
+  display: block;
+  margin-top: 6px;
+  font-size: 13px;
+  color: #9fb8d9;
+  line-height: 1.4;
+}
+
+.touch-hint {
+  border-radius: 12px;
+  border: 1px dashed rgba(0, 214, 255, 0.35);
+  background: rgba(0, 214, 255, 0.06);
+  padding: 10px 12px;
+}
+
+@media (max-width: 720px) {
+  .touch-grid-buttons {
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 10px;
+  }
+
+  .touch-button {
+    min-height: 74px;
+    padding: 14px 16px;
+  }
+
+  .touch-label {
+    font-size: 16px;
+  }
+
+  .pilotage {
+    padding: 16px 12px 18px;
+  }
+}
+
+@media (orientation: landscape) and (max-height: 600px) {
+  .touch-button {
+    min-height: 68px;
+  }
+
+  .touch-helpline {
+    font-size: 12px;
+  }
+}
+
 .hud-block {
   backdrop-filter: blur(8px);
   background: rgba(4, 12, 24, 0.55);
