@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { bubbles } from './data.js';
 
 const AFRAME_CDN = 'https://aframe.io/releases/1.5.0/aframe.min.js';
 
@@ -80,6 +81,7 @@ function registerCalmComponents() {
         }
 
         this.onPointerDown = (event) => {
+          if (event.defaultPrevented) return;
           if (!this.canvas || event.target !== this.canvas) return;
           this.pointerState.set(event.pointerId, { x: event.clientX, y: event.clientY });
           if (this.pointerState.size === 1) {
@@ -276,17 +278,156 @@ function registerCalmComponents() {
       },
     });
   }
+
+  if (!window.AFRAME.components['sky-brush']) {
+    window.AFRAME.registerComponent('sky-brush', {
+      schema: {
+        color: { default: '#b7d3ff' },
+        size: { default: 0.12 },
+        distance: { default: 6 },
+        jitter: { default: 0.3 },
+      },
+      init() {
+        this.three = window.THREE;
+        this.canvas = null;
+        this.camera = null;
+        this.drawing = false;
+        this.lastPoint = null;
+        this.currentStroke = null;
+        this.strokes = document.createElement('a-entity');
+        this.strokes.setAttribute('id', 'strokes');
+        this.el.appendChild(this.strokes);
+
+        this.color = this.data.color;
+        this.size = this.data.size;
+        this.distance = this.data.distance;
+        this.jitter = this.data.jitter;
+
+        this.clearStrokes = () => {
+          while (this.strokes?.firstChild) {
+            this.strokes.removeChild(this.strokes.firstChild);
+          }
+        };
+
+        this.onPointerDown = (event) => {
+          if (event.button !== 0) return;
+          event.preventDefault();
+          if (event.stopPropagation) event.stopPropagation();
+          if (event.stopImmediatePropagation) event.stopImmediatePropagation();
+          this.startStroke(event);
+        };
+
+        this.onPointerMove = (event) => {
+          if (!this.drawing) return;
+          this.extendStroke(event);
+        };
+
+        this.onPointerUp = () => {
+          this.drawing = false;
+          this.lastPoint = null;
+          this.currentStroke = null;
+        };
+
+        this.attachCanvas = () => {
+          if (this.canvas || !this.el.sceneEl?.canvas) return;
+          this.canvas = this.el.sceneEl.canvas;
+          this.camera = this.el.sceneEl.camera;
+          this.canvas.addEventListener('pointerdown', this.onPointerDown, { capture: true });
+          window.addEventListener('pointermove', this.onPointerMove);
+          window.addEventListener('pointerup', this.onPointerUp);
+          window.addEventListener('pointercancel', this.onPointerUp);
+        };
+
+        this.el.sceneEl?.addEventListener('render-target-loaded', this.attachCanvas);
+        this.attachCanvas();
+
+        window.addEventListener('clear-brush-strokes', this.clearStrokes);
+      },
+      remove() {
+        if (this.canvas) {
+          this.canvas.removeEventListener('pointerdown', this.onPointerDown, { capture: true });
+        }
+        window.removeEventListener('pointermove', this.onPointerMove);
+        window.removeEventListener('pointerup', this.onPointerUp);
+        window.removeEventListener('pointercancel', this.onPointerUp);
+        window.removeEventListener('clear-brush-strokes', this.clearStrokes);
+      },
+      update() {
+        this.color = this.data.color;
+        this.size = this.data.size;
+        this.distance = this.data.distance;
+        this.jitter = this.data.jitter;
+      },
+      startStroke(event) {
+        const point = this.projectPoint(event);
+        if (!point) return;
+        this.drawing = true;
+        this.currentStroke = document.createElement('a-entity');
+        this.currentStroke.setAttribute('class', 'brush-stroke');
+        this.strokes.appendChild(this.currentStroke);
+        this.addDot(point, true);
+        this.lastPoint = point.clone();
+      },
+      extendStroke(event) {
+        const point = this.projectPoint(event);
+        if (!point || !this.lastPoint) return;
+        const minStep = this.size * 0.65;
+        if (this.lastPoint.distanceTo(point) < minStep) return;
+        this.addDot(point, false);
+        this.lastPoint.copy(point);
+      },
+      projectPoint(event) {
+        if (!this.canvas || !this.camera || !this.three) return null;
+        const rect = this.canvas.getBoundingClientRect();
+        const x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+        const y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+        const v = new this.three.Vector3(x, y, 0.5);
+        v.unproject(this.camera);
+        const dir = v.sub(this.camera.position).normalize();
+        const jitter = this.jitter * 0.3;
+        const offset = new this.three.Vector3(
+          (Math.random() - 0.5) * jitter,
+          (Math.random() - 0.5) * jitter,
+          (Math.random() - 0.5) * jitter
+        );
+        return new this.three.Vector3()
+          .copy(this.camera.position)
+          .add(dir.multiplyScalar(this.distance))
+          .add(offset);
+      },
+      addDot(point, anchor) {
+        if (!this.currentStroke) return;
+        const dot = document.createElement('a-sphere');
+        const radius = anchor
+          ? this.size * 1.1
+          : this.size * (0.85 + Math.random() * 0.35);
+        dot.setAttribute('radius', radius);
+        dot.setAttribute('position', `${point.x} ${point.y} ${point.z}`);
+        dot.setAttribute('color', this.color || '#b7d3ff');
+        dot.setAttribute(
+          'material',
+          `opacity: 0.76; transparent: true; emissive: ${this.color}; emissiveIntensity: 0.24; roughness: 0.18; metalness: 0.05`
+        );
+        dot.setAttribute('gentle-float', 'amp: 0.03; speed: 0.55');
+        this.currentStroke.appendChild(dot);
+      },
+    });
+  }
 }
 
 export default function App() {
   const ready = useAframeReady();
   const cameraRef = useRef(null);
   const [poem, setPoem] = useState('');
+  const [brushColor, setBrushColor] = useState('#aee0ff');
+  const [brushSize, setBrushSize] = useState(0.12);
+  const [brushDepth, setBrushDepth] = useState(6);
 
   const heroLines = useMemo(
     () => [
       'ÉchoBulle — navigation orbitale grand angle',
       'Glisse pour tourner autour, alt/secondaire pour décaler.',
+      'Maintiens clic et peins dans la direction du regard, façon Tilt Brush.',
       'Molette ou pincement pour zoomer, clique une bulle pour la centrer.',
     ],
     []
@@ -328,6 +469,49 @@ export default function App() {
     window.setTimeout(() => setPoem(''), 1400);
   };
 
+  const networkInsights = useMemo(() => {
+    const total = bubbles.length;
+    const roots = bubbles.filter((b) => !b.parent).map((b) => b.id);
+    const leaves = bubbles.filter((b) => b.children.length === 0).map((b) => b.id);
+
+    const levelMap = bubbles.reduce((acc, b) => {
+      const key = b.level ?? 'indéfini';
+      acc[key] = (acc[key] || 0) + 1;
+      return acc;
+    }, {});
+
+    const missingRefs = bubbles
+      .map((b) => ({
+        id: b.id,
+        missingChildren: b.children.filter((child) => !bubbles.find((c) => c.id === child)),
+        missingLinks: b.links.filter((link) => !bubbles.find((c) => c.id === link)),
+      }))
+      .filter((res) => res.missingChildren.length > 0 || res.missingLinks.length > 0);
+
+    const asymmetricLinks = bubbles
+      .flatMap((b) => b.links.map((link) => ({ from: b.id, to: link })))
+      .filter((edge) => {
+        const target = bubbles.find((b) => b.id === edge.to);
+        return target && !target.links.includes(edge.from);
+      });
+
+    const ideas = [];
+    if (asymmetricLinks.length > 0) ideas.push('Rendre les liens secondaires réciproques pour respirer en miroir.');
+    if (leaves.length > total * 0.5) ideas.push('Créer des bulles intermédiaires pour éviter trop de feuilles isolées.');
+    if (roots.length === 1) ideas.push('Penser à une deuxième racine pour créer un diptyque de mondes.');
+    if (ideas.length === 0) ideas.push('Le réseau est cohérent : ajuster seulement les positions pour plus de profondeur.');
+
+    return {
+      total,
+      roots,
+      leaves,
+      levels: levelMap,
+      missingRefs,
+      asymmetricLinks,
+      ideas,
+    };
+  }, []);
+
   return (
     <div className="shell">
       <div className="ui">
@@ -340,6 +524,118 @@ export default function App() {
           <button type="button" onClick={recenter}>
             ◉ recadrer le réseau
           </button>
+        </div>
+
+        <div className="panel insights">
+          <div className="insights-head">
+            <div className="label">Atelier réseau</div>
+            <div className="meta">construction des bulles</div>
+          </div>
+          <div className="insights-facts">
+            <div className="fact">
+              <div className="fact-label">Total</div>
+              <div className="fact-value">{networkInsights.total}</div>
+            </div>
+            <div className="fact">
+              <div className="fact-label">Racines</div>
+              <div className="fact-value">{networkInsights.roots.join(', ')}</div>
+            </div>
+            <div className="fact">
+              <div className="fact-label">Feuilles</div>
+              <div className="fact-value">{networkInsights.leaves.length}</div>
+            </div>
+            <div className="fact">
+              <div className="fact-label">Niveaux</div>
+              <div className="fact-value">
+                {Object.entries(networkInsights.levels)
+                  .map(([lvl, count]) => `${lvl} → ${count}`)
+                  .join('  •  ')}
+              </div>
+            </div>
+          </div>
+          {networkInsights.missingRefs.length > 0 ? (
+            <div className="insight-note warn">
+              <div className="note-title">Références à ajuster</div>
+              <ul>
+                {networkInsights.missingRefs.map((item) => (
+                  <li key={item.id}>
+                    {item.id} : enfants manquants {item.missingChildren.join(', ') || '—'}, liens manquants{' '}
+                    {item.missingLinks.join(', ') || '—'}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : (
+            <div className="insight-note ok">Aucune référence cassée.</div>
+          )}
+          {networkInsights.asymmetricLinks.length > 0 && (
+            <div className="insight-note warn">
+              <div className="note-title">Liens à réciproquer</div>
+              <ul>
+                {networkInsights.asymmetricLinks.map((edge) => (
+                  <li key={`${edge.from}-${edge.to}`}>
+                    {edge.from} → {edge.to}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          <div className="insight-ideas">
+            {networkInsights.ideas.map((idea) => (
+              <span key={idea}>{idea}</span>
+            ))}
+          </div>
+        </div>
+
+        <div className="panel brush">
+          <div className="brush-head">
+            <div className="label">Gestuelle tilt-brush</div>
+            <div className="meta">dessiner dans l’espace avec la souris</div>
+          </div>
+          <div className="brush-row">
+            <div className="chip-label">Couleur</div>
+            <div className="chips">
+              {['#aee0ff', '#9affd2', '#ffc9a6', '#ffd1ff', '#b3c2ff'].map((color) => (
+                <button
+                  key={color}
+                  type="button"
+                  className={brushColor === color ? 'chip active' : 'chip'}
+                  style={{ background: color, borderColor: brushColor === color ? 'var(--txt)' : color }}
+                  onClick={() => setBrushColor(color)}
+                />
+              ))}
+            </div>
+          </div>
+          <div className="brush-row sliders">
+            <label>
+              Taille
+              <input
+                type="range"
+                min="0.06"
+                max="0.26"
+                step="0.01"
+                value={brushSize}
+                onChange={(e) => setBrushSize(parseFloat(e.target.value))}
+              />
+            </label>
+            <label>
+              Profondeur
+              <input
+                type="range"
+                min="4"
+                max="10"
+                step="0.5"
+                value={brushDepth}
+                onChange={(e) => setBrushDepth(parseFloat(e.target.value))}
+              />
+            </label>
+          </div>
+          <div className="brush-actions">
+            <button type="button" onClick={() => window.dispatchEvent(new CustomEvent('clear-brush-strokes'))}>
+              Effacer les traits
+            </button>
+            <div className="meta">Clique-gauche et glisse : le trait suit le regard à la profondeur choisie.</div>
+          </div>
         </div>
 
         <div className="subtitle-lines">
@@ -362,6 +658,11 @@ export default function App() {
           >
             <a-entity light="type: hemisphere; intensity: 0.8; color: #9bd4ff; groundColor: #0b0f16" />
             <a-entity light="type: directional; intensity: 1.2" position="6 8 3" />
+
+            <a-entity
+              id="brush-area"
+              sky-brush={`color: ${brushColor}; size: ${brushSize}; distance: ${brushDepth}; jitter: 0.32`}
+            />
 
             <a-entity
               id="camera"
@@ -398,7 +699,7 @@ export default function App() {
       </div>
 
       <div className="hint">
-        Navigation style logiciel 3D mobile : glisse pour orbiter, alt/secondaire pour décaler, molette ou pincement pour zoomer. Clique une bulle pour la mettre au centre.
+        Navigation style logiciel 3D mobile : glisse pour orbiter, alt/secondaire pour décaler, molette ou pincement pour zoomer. Clique une bulle pour la mettre au centre. Maintiens clic-gauche pour peindre des filaments à la profondeur choisie.
       </div>
       {poem && <div className="poem show">{poem}</div>}
     </div>
