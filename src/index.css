@@ -52,6 +52,44 @@ body {
   pointer-events: auto;
 }
 
+.collapsible {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.hud-block-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.hud-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.hud-toggle {
+  pointer-events: auto;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.04);
+  color: #e8f7ff;
+  padding: 8px 10px;
+  border-radius: 10px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  cursor: pointer;
+  transition: border-color 160ms ease, transform 160ms ease;
+}
+
+.hud-toggle:hover {
+  border-color: rgba(255, 255, 255, 0.3);
+  transform: translateY(-1px);
+}
+
 .hud-kicker {
   font-size: 12px;
   letter-spacing: 0.08em;
@@ -137,6 +175,12 @@ body {
   animation: pulse 2.8s ease-in-out infinite;
 }
 
+.audio-error {
+  margin: 0;
+  color: #ffb4c0;
+  font-size: 13px;
+}
+
 .hud-button-small {
   padding: 9px 12px;
 }
@@ -155,9 +199,8 @@ body {
 
 .hud-selection {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
+  flex-direction: column;
+  gap: 10px;
   max-width: 460px;
   padding: 12px 14px;
   border-radius: 12px;
