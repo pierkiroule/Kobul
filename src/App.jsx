@@ -1,5 +1,4 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import VirtualJoystick from './controls/VirtualJoystick.jsx';
 
 const AFRAME_CDN = 'https://aframe.io/releases/1.5.0/aframe.min.js';
 
@@ -48,89 +47,168 @@ function registerCalmComponents() {
     });
   }
 
-  if (!window.AFRAME.components['joystick-motion']) {
-    window.AFRAME.registerComponent('joystick-motion', {
+  if (!window.AFRAME.components['orbit-manipulation']) {
+    window.AFRAME.registerComponent('orbit-manipulation', {
       schema: {
-        x: { default: 0 },
-        y: { default: 0 },
-        mode: { default: 'strafe' },
-        pivot: { type: 'vec3', default: { x: 0, y: 1.4, z: -2.4 } },
-        acceleration: { default: 3.6 },
-        damping: { default: 1.9 },
-        maxSpeed: { default: 2.8 },
-        deadZone: { default: 0.04 },
-        orbitYawRate: { default: 1.8 },
-        orbitDolly: { default: 1.2 },
-        orbitMin: { default: 1.6 },
-        orbitMax: { default: 18 },
+        target: { type: 'vec3', default: { x: 0, y: 1.1, z: -2 } },
+        distance: { default: 12 },
+        minDistance: { default: 3.2 },
+        maxDistance: { default: 90 },
+        minPolar: { default: 0.35 },
+        maxPolar: { default: 1.45 },
+        rotateSpeed: { default: 0.22 },
+        panSpeed: { default: 1.0 },
+        zoomSpeed: { default: 0.95 },
+        focusDistance: { default: 7 },
       },
       init() {
         const { THREE } = window;
-        this.velocity = new THREE.Vector3();
-        this.heading = new THREE.Vector3();
-        this.euler = new THREE.Euler();
-        this.pivotVec = new THREE.Vector3();
-        this.orbitOffset = new THREE.Vector3();
-        this.up = new THREE.Vector3(0, 1, 0);
-        this.resetMotion = () => {
-          this.velocity.set(0, 0, 0);
+        this.three = THREE;
+        this.target = new THREE.Vector3(this.data.target.x, this.data.target.y, this.data.target.z);
+        this.spherical = new THREE.Spherical(this.data.distance, 1.05, 0);
+        this.pointerState = new Map();
+        this.mode = 'none';
+        this.canvas = null;
+        this.midpoint = new THREE.Vector2();
+        this.lastPinch = 0;
+        this.panOffset = new THREE.Vector3();
+
+        const offset = new THREE.Vector3();
+        offset.copy(this.el.object3D.position).sub(this.target);
+        if (offset.length() > 0.001) {
+          this.spherical.setFromVector3(offset);
+        }
+
+        this.onPointerDown = (event) => {
+          if (!this.canvas || event.target !== this.canvas) return;
+          this.pointerState.set(event.pointerId, { x: event.clientX, y: event.clientY });
+          if (this.pointerState.size === 1) {
+            this.mode = event.button === 1 || event.button === 2 || event.altKey ? 'pan' : 'rotate';
+          } else if (this.pointerState.size === 2) {
+            this.mode = 'pinch';
+            const pts = [...this.pointerState.values()];
+            this.lastPinch = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
+            this.midpoint.set((pts[0].x + pts[1].x) / 2, (pts[0].y + pts[1].y) / 2);
+          }
+          if (this.canvas.setPointerCapture) this.canvas.setPointerCapture(event.pointerId);
         };
-        this.el.flushMotion = this.resetMotion;
+
+        this.onPointerMove = (event) => {
+          if (!this.pointerState.has(event.pointerId)) return;
+          const prev = this.pointerState.get(event.pointerId);
+          const dx = event.clientX - prev.x;
+          const dy = event.clientY - prev.y;
+          this.pointerState.set(event.pointerId, { x: event.clientX, y: event.clientY });
+
+          if (this.mode === 'rotate' && this.pointerState.size === 1) {
+            this.spherical.theta -= dx * 0.0025 * this.data.rotateSpeed;
+            this.spherical.phi = Math.min(
+              this.data.maxPolar,
+              Math.max(this.data.minPolar, this.spherical.phi - dy * 0.002 * this.data.rotateSpeed)
+            );
+            this.updateCamera();
+          } else if (this.mode === 'pan' && this.pointerState.size === 1) {
+            this.pan(dx, dy);
+            this.updateCamera();
+          } else if (this.pointerState.size === 2) {
+            const pts = [...this.pointerState.values()];
+            const pinch = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
+            const midX = (pts[0].x + pts[1].x) / 2;
+            const midY = (pts[0].y + pts[1].y) / 2;
+            const mdx = midX - this.midpoint.x;
+            const mdy = midY - this.midpoint.y;
+            this.midpoint.set(midX, midY);
+            if (this.lastPinch > 0 && pinch > 0.001) {
+              const scale = this.lastPinch / pinch;
+              this.spherical.radius = this.clampDistance(this.spherical.radius * scale);
+            }
+            this.lastPinch = pinch;
+            this.pan(mdx, mdy);
+            this.updateCamera();
+          }
+        };
+
+        this.onPointerUp = (event) => {
+          if (!this.pointerState.has(event.pointerId)) return;
+          this.pointerState.delete(event.pointerId);
+          if (this.canvas?.releasePointerCapture) {
+            try {
+              this.canvas.releasePointerCapture(event.pointerId);
+            } catch (err) {
+              /* noop */
+            }
+          }
+          if (this.pointerState.size === 0) {
+            this.mode = 'none';
+            this.lastPinch = 0;
+          }
+        };
+
+        this.onWheel = (event) => {
+          event.preventDefault();
+          const step = 1 + this.data.zoomSpeed * 0.05;
+          const scale = event.deltaY > 0 ? 1 / step : step;
+          this.spherical.radius = this.clampDistance(this.spherical.radius * scale);
+          this.updateCamera();
+        };
+
+        this.focusHandler = (event) => {
+          const p = event.detail?.position;
+          if (!p) return;
+          this.target.set(p.x, p.y, p.z);
+          this.spherical.radius = this.clampDistance(this.data.focusDistance);
+          this.updateCamera();
+        };
+
+        this.attachCanvas = () => {
+          if (this.canvas || !this.el.sceneEl?.canvas) return;
+          this.canvas = this.el.sceneEl.canvas;
+          this.canvas.addEventListener('pointerdown', this.onPointerDown);
+          window.addEventListener('pointermove', this.onPointerMove);
+          window.addEventListener('pointerup', this.onPointerUp);
+          window.addEventListener('pointercancel', this.onPointerUp);
+          this.canvas.addEventListener('wheel', this.onWheel, { passive: false });
+        };
+
+        this.el.sceneEl?.addEventListener('render-target-loaded', this.attachCanvas);
+        this.attachCanvas();
+
+        window.addEventListener('focus-bubble', this.focusHandler);
       },
-      tick(time, dt) {
-        const delta = Math.min(dt || 16, 48) / 1000;
-        const { THREE } = window;
-        if (!THREE) return;
-
-        const inputX = this.data.x || 0;
-        const inputY = this.data.y || 0;
-        const deadZone = this.data.deadZone;
-
-        if (this.data.mode === 'orbit') {
-          // Mobile CAO-like orbit: rotate around a pivot and dolly in/out with the joystick.
-          this.pivotVec.set(this.data.pivot.x, this.data.pivot.y, this.data.pivot.z);
-          this.orbitOffset.copy(this.el.object3D.position).sub(this.pivotVec);
-
-          let dist = Math.max(this.orbitOffset.length(), this.data.orbitMin);
-
-          if (Math.abs(inputX) > deadZone) {
-            this.orbitOffset.applyAxisAngle(this.up, -inputX * this.data.orbitYawRate * delta);
-          }
-
-          if (Math.abs(inputY) > deadZone) {
-            const dolly = inputY * this.data.orbitDolly * delta;
-            dist = Math.min(this.data.orbitMax, Math.max(this.data.orbitMin, dist + dolly));
-          }
-
-          if (dist > 0) {
-            this.orbitOffset.setLength(dist);
-          }
-
-          this.el.object3D.position.copy(this.pivotVec).add(this.orbitOffset);
-          this.el.object3D.lookAt(this.pivotVec);
-
-          // keep inertia cleared so orbiting stays crisp
-          const damping = Math.exp(-this.data.damping * delta);
-          this.velocity.multiplyScalar(damping * 0.92);
-          return;
+      remove() {
+        if (this.canvas) {
+          this.canvas.removeEventListener('pointerdown', this.onPointerDown);
+          this.canvas.removeEventListener('wheel', this.onWheel);
         }
-
-        this.heading.set(inputX, 0, -inputY);
-        if (this.heading.lengthSq() > 1) this.heading.normalize();
-
-        this.euler.set(0, this.el.object3D.rotation.y, 0, 'YXZ');
-        this.heading.applyEuler(this.euler);
-
-        this.velocity.addScaledVector(this.heading, this.data.acceleration * delta);
-        const speed = this.velocity.length();
-        if (speed > this.data.maxSpeed) {
-          this.velocity.multiplyScalar(this.data.maxSpeed / speed);
-        }
-
-        const damping = Math.exp(-this.data.damping * delta);
-        this.velocity.multiplyScalar(damping);
-
-        this.el.object3D.position.addScaledVector(this.velocity, delta);
+        window.removeEventListener('pointermove', this.onPointerMove);
+        window.removeEventListener('pointerup', this.onPointerUp);
+        window.removeEventListener('pointercancel', this.onPointerUp);
+        window.removeEventListener('focus-bubble', this.focusHandler);
+      },
+      clampDistance(v) {
+        return Math.min(this.data.maxDistance, Math.max(this.data.minDistance, v));
+      },
+      pan(deltaX, deltaY) {
+        const camera = this.el.getObject3D('camera') || this.el.object3D;
+        const distance = this.spherical.radius;
+        const height = this.canvas?.clientHeight || 1;
+        const panX = (-deltaX * distance) / height * this.data.panSpeed;
+        const panY = (deltaY * distance) / height * this.data.panSpeed;
+        const te = camera.matrix.elements;
+        this.panOffset.set(te[0], te[1], te[2]).multiplyScalar(panX);
+        this.target.add(this.panOffset);
+        this.panOffset.set(te[4], te[5], te[6]).multiplyScalar(panY);
+        this.target.add(this.panOffset);
+      },
+      updateCamera() {
+        const offset = new this.three.Vector3().setFromSpherical(this.spherical);
+        const target = new this.three.Vector3(this.target.x, this.target.y, this.target.z);
+        this.el.object3D.position.copy(target).add(offset);
+        this.el.object3D.lookAt(target);
+      },
+      tick() {
+        if (!this.three) return;
+        this.updateCamera();
       },
     });
   }
@@ -146,20 +224,20 @@ function registerCalmComponents() {
         const { THREE } = window;
         this.three = THREE;
         this.temp = new THREE.Vector3();
-        this.rigPos = new THREE.Vector3();
-        this.rig = null;
+        this.camPos = new THREE.Vector3();
+        this.cam = null;
         this.lastHit = 0;
       },
       tick(time) {
         if (!this.three) return;
-        if (!this.rig) {
-          this.rig = this.el.sceneEl?.querySelector('#cameraRig');
-          if (!this.rig) return;
+        if (!this.cam) {
+          this.cam = this.el.sceneEl?.querySelector('#camera');
+          if (!this.cam) return;
         }
 
         this.el.object3D.getWorldPosition(this.temp);
-        this.rig.object3D.getWorldPosition(this.rigPos);
-        const d = this.temp.distanceTo(this.rigPos);
+        this.cam.object3D.getWorldPosition(this.camPos);
+        const d = this.temp.distanceTo(this.camPos);
         if (d < this.data.radius && time - this.lastHit > this.data.cooldown) {
           this.lastHit = time;
           window.dispatchEvent(
@@ -171,22 +249,45 @@ function registerCalmComponents() {
       },
     });
   }
+
+  if (!window.AFRAME.components['bubble-focus']) {
+    window.AFRAME.registerComponent('bubble-focus', {
+      schema: {
+        text: { default: '' },
+      },
+      init() {
+        this.el.classList.add('focusable');
+        this.el.addEventListener('click', () => {
+          const p = new window.THREE.Vector3();
+          this.el.object3D.getWorldPosition(p);
+          window.dispatchEvent(
+            new CustomEvent('focus-bubble', {
+              detail: { position: { x: p.x, y: p.y, z: p.z }, text: this.data.text },
+            })
+          );
+          if (this.data.text) {
+            window.dispatchEvent(
+              new CustomEvent('poem-hit', {
+                detail: { text: this.data.text },
+              })
+            );
+          }
+        });
+      },
+    });
+  }
 }
 
 export default function App() {
   const ready = useAframeReady();
-  const rigRef = useRef(null);
-  const [moveInput, setMoveInput] = useState({ x: 0, y: 0 });
-  const [force, setForce] = useState(1.4);
-  const [speed, setSpeed] = useState(1.0);
+  const cameraRef = useRef(null);
   const [poem, setPoem] = useState('');
-  const [navMode, setNavMode] = useState('orbit');
 
   const heroLines = useMemo(
     () => [
-      'ÉchoBulle — navigation contemplative',
-      'Glisser pour orienter. Joystick façon CAO moléculaire.',
-      'Doux, stable, mobile-first.',
+      'ÉchoBulle — navigation orbitale grand angle',
+      'Glisse pour tourner autour, alt/secondaire pour décaler.',
+      'Molette ou pincement pour zoomer, clique une bulle pour la centrer.',
     ],
     []
   );
@@ -197,21 +298,8 @@ export default function App() {
   }, [ready]);
 
   useEffect(() => {
-    if (!rigRef.current) return;
-    rigRef.current.setAttribute('joystick-motion', {
-      x: moveInput.x,
-      y: moveInput.y,
-      mode: navMode,
-      pivot: { x: 0, y: 1.4, z: -2.4 },
-      acceleration: 2.2 * force,
-      damping: 1.1 + speed * 0.6,
-      maxSpeed: 1.8 + speed * 1.6,
-    });
-  }, [moveInput, force, speed, navMode]);
-
-  useEffect(() => {
     const handler = (event) => {
-      setPoem(event.detail?.text || '');
+      if (event.detail?.text) setPoem(event.detail.text);
       window.clearTimeout(handler.timer);
       handler.timer = window.setTimeout(() => setPoem(''), 2200);
     };
@@ -233,13 +321,11 @@ export default function App() {
   );
 
   const recenter = () => {
-    if (!rigRef.current) return;
-    const rig = rigRef.current;
-    rig.object3D.position.set(0, 1.4, 5);
-    rig.object3D.rotation.set(0, 0, 0);
-    rig.components['joystick-motion']?.flushMotion?.();
-    setPoem('recentrage — respire…');
-    window.setTimeout(() => setPoem(''), 1600);
+    window.dispatchEvent(
+      new CustomEvent('focus-bubble', { detail: { position: { x: 0, y: 1.1, z: -2 } } })
+    );
+    setPoem('réseau recentré');
+    window.setTimeout(() => setPoem(''), 1400);
   };
 
   return (
@@ -247,53 +333,13 @@ export default function App() {
       <div className="ui">
         <div className="title">
           <div className="label">🫧 Kobul</div>
-          <div className="meta">PsychoCosmos — déplacement par impulsions</div>
+          <div className="meta">PsychoCosmos — réseau de bulles 3D</div>
         </div>
 
-        <div className="panel">
-          <div className="row">
-            <label htmlFor="force">force</label>
-            <input
-              id="force"
-              type="range"
-              min="0.4"
-              max="3.0"
-              step="0.05"
-              value={force}
-              onChange={(e) => setForce(parseFloat(e.target.value))}
-            />
-          </div>
-          <div className="row">
-            <label htmlFor="speed">vitesse</label>
-            <input
-              id="speed"
-              type="range"
-              min="0.35"
-              max="2.2"
-              step="0.05"
-              value={speed}
-              onChange={(e) => setSpeed(parseFloat(e.target.value))}
-            />
-          </div>
+        <div className="panel solo">
           <button type="button" onClick={recenter}>
-            ◉ recentrer
+            ◉ recadrer le réseau
           </button>
-          <div className="mode-toggle" role="group" aria-label="mode de navigation">
-            <button
-              type="button"
-              className={navMode === 'orbit' ? 'active' : ''}
-              onClick={() => setNavMode('orbit')}
-            >
-              orbite
-            </button>
-            <button
-              type="button"
-              className={navMode === 'strafe' ? 'active' : ''}
-              onClick={() => setNavMode('strafe')}
-            >
-              translation
-            </button>
-          </div>
         </div>
 
         <div className="subtitle-lines">
@@ -307,6 +353,8 @@ export default function App() {
         {ready ? (
           <a-scene
             embedded
+            cursor="rayOrigin: mouse; fuse: false"
+            raycaster="objects: .focusable"
             fog="type: exponential; color: #0a1a2b; density: 0.035"
             renderer="colorManagement: true; antialias: true; foveationLevel: 2"
             background="color: #0a1a2b"
@@ -316,33 +364,32 @@ export default function App() {
             <a-entity light="type: directional; intensity: 1.2" position="6 8 3" />
 
             <a-entity
-              id="cameraRig"
-              ref={rigRef}
-              position="0 1.4 5"
-              joystick-motion="x: 0; y: 0; acceleration: 3.6; damping: 1.9; maxSpeed: 2.8"
-            >
-              <a-entity
-                id="camera"
-                camera="active: true"
-                look-controls="touchEnabled: true; mouseEnabled: true; pointerLockEnabled: false"
-                position="0 0 0"
-              />
-            </a-entity>
+              id="camera"
+              ref={cameraRef}
+              camera="active: true; fov: 82"
+              orbit-manipulation="target: 0 1.1 -2; distance: 12; minDistance: 3.2; maxDistance: 90"
+              position="0 6 12"
+            />
 
             <a-entity id="field" position="0 0 -4">
               {poemNodes.map((node) => (
                 <a-sphere
                   key={node.position}
                   position={node.position}
-                  radius="0.85"
+                  radius="0.95"
                   color="#b7d3ff"
                   material="opacity: 0.74; transparent: true; emissive: #b7d3ff; emissiveIntensity: 0.24; roughness: 0.25; metalness: 0.08"
                   gentle-float="amp: 0.12; speed: 0.32"
                   soft-pulse="base: 1; boost: 0.07; speed: 1"
+                  bubble-focus={`text: ${node.text}`}
                   poem-node={`text: ${node.text}; radius: 1.65; cooldown: 1600`}
                 />
               ))}
-              <a-entity position="0 -0.6 -2" geometry="primitive: ring; radiusInner: 6; radiusOuter: 7" material="color: #0d1525; opacity: 0.35; side: double" />
+              <a-entity
+                position="0 -0.6 -2"
+                geometry="primitive: ring; radiusInner: 6; radiusOuter: 7"
+                material="color: #0d1525; opacity: 0.35; side: double"
+              />
             </a-entity>
           </a-scene>
         ) : (
@@ -350,16 +397,9 @@ export default function App() {
         )}
       </div>
 
-      <VirtualJoystick
-        onChange={setMoveInput}
-        hint={
-          navMode === 'orbit'
-            ? 'Glisse pour orbiter comme sur un viewer moléculaire (GPAO/CAO).'
-            : 'Glisse pour dériver en translation douce.'
-        }
-      />
-
-      <div className="hint">Astuce : fais des petites impulsions. Laisse l’inertie faire. Approche une bulle : un mot surgit.</div>
+      <div className="hint">
+        Navigation style logiciel 3D mobile : glisse pour orbiter, alt/secondaire pour décaler, molette ou pincement pour zoomer. Clique une bulle pour la mettre au centre.
+      </div>
       {poem && <div className="poem show">{poem}</div>}
     </div>
   );

@@ -87,21 +87,8 @@ body {
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
 }
 
-.row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-label {
-  color: var(--muted);
-  font-size: 12px;
-  white-space: nowrap;
-}
-
-input[type='range'] {
-  width: 140px;
-  accent-color: var(--glow);
+.panel.solo {
+  gap: 14px;
 }
 
 button {
@@ -120,27 +107,6 @@ button {
 button:active {
   transform: translateY(1px);
   background: rgba(255, 255, 255, 0.12);
-}
-
-.mode-toggle {
-  display: inline-flex;
-  gap: 6px;
-  padding-left: 12px;
-  border-left: 1px solid rgba(255, 255, 255, 0.08);
-}
-
-.mode-toggle button {
-  min-width: 108px;
-  background: rgba(255, 255, 255, 0.06);
-  border-radius: 10px;
-  border-color: rgba(255, 255, 255, 0.12);
-  font-size: 12px;
-}
-
-.mode-toggle button.active {
-  background: linear-gradient(135deg, rgba(126, 198, 255, 0.4), rgba(255, 255, 255, 0.12));
-  color: #f6fbff;
-  box-shadow: 0 0 0 1px rgba(126, 198, 255, 0.28), 0 8px 20px rgba(0, 0, 0, 0.35);
 }
 
 .subtitle-lines {
@@ -177,55 +143,6 @@ button:active {
   color: var(--muted);
   font-size: 14px;
   letter-spacing: 0.02em;
-}
-
-.joystick-wrapper {
-  position: fixed;
-  inset: auto 12px 78px 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  align-items: flex-start;
-  pointer-events: auto;
-}
-
-.joystick-hint {
-  font-size: 12px;
-  color: var(--muted);
-  letter-spacing: 0.02em;
-}
-
-.joystick-pad {
-  width: 110px;
-  height: 110px;
-  border-radius: 18px;
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  background: rgba(255, 255, 255, 0.02);
-  position: relative;
-  box-shadow: inset 0 10px 30px rgba(0, 0, 0, 0.4);
-  touch-action: none;
-}
-
-.joystick-cross {
-  position: absolute;
-  inset: 12px;
-  border-radius: 14px;
-  border: 1px dashed rgba(255, 255, 255, 0.08);
-  pointer-events: none;
-}
-
-.joystick-nub {
-  width: 54px;
-  height: 54px;
-  border-radius: 50%;
-  background: linear-gradient(145deg, rgba(126, 198, 255, 0.65), rgba(255, 255, 255, 0.15));
-  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.35), inset 0 2px 6px rgba(255, 255, 255, 0.2);
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  transition: transform 120ms ease-out;
-  pointer-events: none;
 }
 
 .hint {
@@ -274,11 +191,5 @@ button:active {
 @media (min-width: 900px) {
   .panel {
     gap: 14px;
-  }
-
-  .joystick-wrapper {
-    left: 32px;
-    bottom: 110px;
-    width: auto;
   }
 }
