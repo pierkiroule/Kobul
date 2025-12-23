@@ -213,11 +213,16 @@ export default function App() {
 
     const nodes = uniqueTags.map((tag, index) => {
       const sprite = createTextSprite(tag, '#fdfbff');
-      const radius = 0.45;
-      const offset = new THREE.Vector3(
-        (Math.random() - 0.5) * radius,
-        (Math.random() - 0.5) * radius,
-        (Math.random() - 0.5) * radius,
+      const radius = 1.05;
+      const jitter = 0.35;
+      const seed = new THREE.Vector3(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).normalize();
+      seed.multiplyScalar(radius * (0.7 + Math.random() * 0.6));
+      const offset = seed.add(
+        new THREE.Vector3(
+          (Math.random() - 0.5) * jitter,
+          (Math.random() - 0.5) * jitter,
+          (Math.random() - 0.5) * jitter,
+        ),
       );
       sprite.position.copy(offset);
       sprite.userData.tag = tag;
@@ -558,11 +563,11 @@ export default function App() {
 
         cluster.nodes.forEach((sprite) => {
           const wobble = sprite.userData.wobble;
-          sprite.position.x = sprite.userData.offset.x + Math.sin(elapsed * 0.7 + wobble) * 0.04;
-          sprite.position.y = sprite.userData.offset.y + Math.cos(elapsed * 0.6 + wobble * 1.3) * 0.04;
-          sprite.position.z = sprite.userData.offset.z + Math.sin(elapsed * 0.5 + wobble * 0.7) * 0.04;
-          sprite.lookAt(camera.position);
-        });
+      sprite.position.x = sprite.userData.offset.x + Math.sin(elapsed * 0.7 + wobble) * 0.06;
+      sprite.position.y = sprite.userData.offset.y + Math.cos(elapsed * 0.6 + wobble * 1.3) * 0.06;
+      sprite.position.z = sprite.userData.offset.z + Math.sin(elapsed * 0.5 + wobble * 0.7) * 0.06;
+      sprite.lookAt(camera.position);
+    });
       });
 
       if (pendingIntegrations.length > 0 && seedGroupRef.current) {
@@ -923,7 +928,7 @@ export default function App() {
     group.add(core);
 
     const lines = [];
-    const radius = 1 + Math.random() * 0.4;
+    const radius = 1.4 + Math.random() * 0.5;
     tags.forEach((tag, index) => {
       const phi = Math.acos(1 - (2 * (index + 0.5)) / (tags.length + 1));
       const theta = Math.PI * (1 + Math.sqrt(5)) * index;
