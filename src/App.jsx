@@ -169,7 +169,7 @@ export default function App() {
   const haloRef = useRef(null);
   const frameIdRef = useRef(null);
   const seedGroupRef = useRef(null);
-  const seedParticlesRef = useRef([]);
+  const seedClustersRef = useRef([]);
   const settledSeedsRef = useRef([]);
   const bubbleTagGroupsRef = useRef(new Map());
   const restoreControlsRef = useRef(null);
@@ -207,23 +207,57 @@ export default function App() {
   const releaseSeeds = (tags) => {
     if (!seedGroupRef.current || tags.length === 0) return;
     const uniqueTags = Array.from(new Set(tags));
-    uniqueTags.forEach((tag, index) => {
-      const sprite = createTextSprite(tag, '#fdfbff');
-      sprite.position.set((Math.random() - 0.5) * 10, (Math.random() - 0.5) * 6, (Math.random() - 0.5) * 10);
-      sprite.userData.tag = tag;
-      seedGroupRef.current.add(sprite);
 
-      seedParticlesRef.current.push({
-        sprite,
-        velocity: new THREE.Vector3((Math.random() - 0.5) * 0.011, (Math.random() - 0.5) * 0.009, (Math.random() - 0.5) * 0.011),
-        wander: Math.random() * Math.PI * 2 + index,
-        bounceLimit: 10 + Math.floor(Math.random() * 21),
-        bounces: 0,
-        lastBounceId: null,
-        orbitPhase: Math.random() * Math.PI * 2,
-      });
+    const cluster = new THREE.Group();
+    cluster.position.set((Math.random() - 0.5) * 8, (Math.random() - 0.5) * 5, (Math.random() - 0.5) * 8);
+
+    const nodes = uniqueTags.map((tag, index) => {
+      const sprite = createTextSprite(tag, '#fdfbff');
+      const radius = 0.45;
+      const offset = new THREE.Vector3(
+        (Math.random() - 0.5) * radius,
+        (Math.random() - 0.5) * radius,
+        (Math.random() - 0.5) * radius,
+      );
+      sprite.position.copy(offset);
+      sprite.userData.tag = tag;
+      sprite.userData.offset = offset;
+      sprite.userData.wobble = Math.random() * Math.PI * 2 + index;
+      cluster.add(sprite);
+      return sprite;
     });
-    logEvent(`Ensemencement (${uniqueTags.join(' ')}) libéré dans le réseau.`);
+
+    if (nodes.length > 1) {
+      const positions = [];
+      nodes.forEach((node, idx) => {
+        const next = nodes[(idx + 1) % nodes.length];
+        positions.push(node.position.x, node.position.y, node.position.z, next.position.x, next.position.y, next.position.z);
+        if (nodes.length > 3 && idx % 2 === 0) {
+          const cross = nodes[(idx + 2) % nodes.length];
+          positions.push(node.position.x, node.position.y, node.position.z, cross.position.x, cross.position.y, cross.position.z);
+        }
+      });
+      const lineGeom = new THREE.BufferGeometry();
+      lineGeom.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+      const lineMat = new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.22 });
+      const lines = new THREE.LineSegments(lineGeom, lineMat);
+      lines.userData.isClusterLines = true;
+      cluster.add(lines);
+    }
+
+    seedGroupRef.current.add(cluster);
+
+    seedClustersRef.current.push({
+      group: cluster,
+      nodes,
+      tags: uniqueTags,
+      velocity: new THREE.Vector3((Math.random() - 0.5) * 0.009, (Math.random() - 0.5) * 0.007, (Math.random() - 0.5) * 0.009),
+      wander: Math.random() * Math.PI * 2,
+      orbitPhase: Math.random() * Math.PI * 2,
+      bounceHistory: new Set(),
+    });
+
+    logEvent(`Grappe (${uniqueTags.join(' ')}) libérée, déjà reliée en mini réseau.`);
   };
 
   const handleSeedNetwork = (event) => {
@@ -351,7 +385,7 @@ export default function App() {
     const seedGroup = new THREE.Group();
     scene.add(seedGroup);
     seedGroupRef.current = seedGroup;
-    seedParticlesRef.current = [];
+    seedClustersRef.current = [];
 
     const haloGeometry = new THREE.SphereGeometry(1.6, 42, 42);
     const haloMaterial = new THREE.MeshBasicMaterial({
@@ -456,108 +490,130 @@ export default function App() {
       }
 
       const pendingIntegrations = [];
-      seedParticlesRef.current.forEach((seed) => {
+      seedClustersRef.current.forEach((cluster) => {
         let nearest = null;
         let nearestDistance = Infinity;
         atoms.forEach((atom) => {
-          const distance = atom.position.distanceTo(seed.sprite.position);
+          const distance = atom.position.distanceTo(cluster.group.position);
           if (distance < nearestDistance) {
             nearestDistance = distance;
             nearest = atom;
           }
         });
 
-        const wanderStrength = 0.0025 + Math.sin(elapsed + seed.wander) * 0.0012;
-        seed.velocity.x += (Math.random() - 0.5) * wanderStrength * 0.2;
-        seed.velocity.y += (Math.random() - 0.5) * wanderStrength * 0.2;
-        seed.velocity.z += (Math.random() - 0.5) * wanderStrength * 0.2;
+        const wanderStrength = 0.0015 + Math.sin(elapsed + cluster.wander) * 0.0008;
+        cluster.velocity.x += (Math.random() - 0.5) * wanderStrength * 0.22;
+        cluster.velocity.y += (Math.random() - 0.5) * wanderStrength * 0.22;
+        cluster.velocity.z += (Math.random() - 0.5) * wanderStrength * 0.22;
 
         const orbitPush = new THREE.Vector3(
-          Math.sin(elapsed * 0.3 + seed.orbitPhase),
-          Math.sin(elapsed * 0.18 + seed.orbitPhase * 1.4) * 0.36,
-          Math.cos(elapsed * 0.3 + seed.orbitPhase),
-        ).multiplyScalar(0.0016);
-        seed.velocity.add(orbitPush);
+          Math.sin(elapsed * 0.2 + cluster.orbitPhase),
+          Math.sin(elapsed * 0.16 + cluster.orbitPhase * 1.3) * 0.28,
+          Math.cos(elapsed * 0.2 + cluster.orbitPhase),
+        ).multiplyScalar(0.0013);
+        cluster.velocity.add(orbitPush);
 
-        const coreVector = seed.sprite.position.clone().multiplyScalar(-1);
+        const coreVector = cluster.group.position.clone().multiplyScalar(-1);
         const coreDistance = Math.max(coreVector.length(), 0.001);
         coreVector.normalize();
-        const corePull = Math.min(coreDistance / 18, 1) * 0.008;
-        seed.velocity.addScaledVector(coreVector, corePull);
+        const corePull = Math.min(coreDistance / 16, 1) * 0.007;
+        cluster.velocity.addScaledVector(coreVector, corePull);
 
         if (nearest) {
-          const direction = new THREE.Vector3().subVectors(nearest.position, seed.sprite.position);
+          const direction = new THREE.Vector3().subVectors(nearest.position, cluster.group.position);
           const distance = Math.max(direction.length(), 0.001);
           direction.normalize();
-          const pull = 0.01 / distance;
-          seed.velocity.addScaledVector(direction, pull);
+          const pull = 0.012 / distance;
+          cluster.velocity.addScaledVector(direction, pull);
 
-          if (distance < 1.1) {
-            const normal = new THREE.Vector3().subVectors(seed.sprite.position, nearest.position).normalize();
-            const hasNewBounce = nearest.userData.meta.id !== seed.lastBounceId;
-            if (seed.bounces < seed.bounceLimit && hasNewBounce) {
-              const reflected = seed.velocity.clone().sub(normal.clone().multiplyScalar(2 * seed.velocity.dot(normal)));
-              seed.velocity.copy(reflected.multiplyScalar(0.85));
-              seed.velocity.addScaledVector(normal, 0.02);
-              seed.lastBounceId = nearest.userData.meta.id;
-              seed.bounces += 1;
-            } else if (seed.bounces >= seed.bounceLimit) {
-              pendingIntegrations.push({ bubbleId: nearest.userData.meta.id, tag: seed.sprite.userData.tag, sprite: seed.sprite });
+          if (distance < 1.2) {
+            const normal = new THREE.Vector3().subVectors(cluster.group.position, nearest.position).normalize();
+            const isNewBounce = !cluster.bounceHistory.has(nearest.userData.meta.id);
+
+            if (cluster.bounceHistory.size >= 3) {
+              const randomTarget = atoms[Math.floor(Math.random() * atoms.length)];
+              pendingIntegrations.push({
+                bubbleId: randomTarget?.userData.meta.id || nearest.userData.meta.id,
+                sprites: cluster.nodes,
+                tags: cluster.tags,
+                cluster,
+              });
             } else {
-              seed.velocity.addScaledVector(normal, 0.012);
+              if (isNewBounce) cluster.bounceHistory.add(nearest.userData.meta.id);
+              const reflected = cluster.velocity.clone().sub(normal.clone().multiplyScalar(2 * cluster.velocity.dot(normal)));
+              cluster.velocity.copy(reflected.multiplyScalar(0.9));
+              cluster.velocity.addScaledVector(normal, 0.018);
             }
           }
         }
 
-        const maxSpeed = 0.024;
-        const speed = seed.velocity.length();
+        const maxSpeed = 0.02;
+        const speed = cluster.velocity.length();
         if (speed > maxSpeed) {
-          seed.velocity.multiplyScalar(maxSpeed / speed);
+          cluster.velocity.multiplyScalar(maxSpeed / speed);
         }
 
-        seed.velocity.multiplyScalar(0.989);
-        seed.sprite.position.add(seed.velocity);
-        seed.sprite.lookAt(camera.position);
+        cluster.velocity.multiplyScalar(0.99);
+        cluster.group.position.add(cluster.velocity);
+
+        cluster.nodes.forEach((sprite) => {
+          const wobble = sprite.userData.wobble;
+          sprite.position.x = sprite.userData.offset.x + Math.sin(elapsed * 0.7 + wobble) * 0.04;
+          sprite.position.y = sprite.userData.offset.y + Math.cos(elapsed * 0.6 + wobble * 1.3) * 0.04;
+          sprite.position.z = sprite.userData.offset.z + Math.sin(elapsed * 0.5 + wobble * 0.7) * 0.04;
+          sprite.lookAt(camera.position);
+        });
       });
 
       if (pendingIntegrations.length > 0 && seedGroupRef.current) {
-        pendingIntegrations.forEach(({ sprite, bubbleId }) => {
-          seedParticlesRef.current = seedParticlesRef.current.filter((entry) => entry.sprite !== sprite);
-          seedGroupRef.current.remove(sprite);
-
-          const targetNest = bubbleTagGroupsRef.current.get(bubbleId);
-          if (targetNest) {
-            sprite.position.set((Math.random() - 0.5) * 0.8, (Math.random() - 0.5) * 0.8, (Math.random() - 0.5) * 0.8);
-            sprite.scale.multiplyScalar(0.7);
-            sprite.material.opacity = 0.95;
-            targetNest.add(sprite);
-            settledSeedsRef.current.push({
-              bubbleId,
-              sprite,
-              velocity: new THREE.Vector3((Math.random() - 0.5) * 0.003, (Math.random() - 0.5) * 0.003, (Math.random() - 0.5) * 0.003),
-              drift: Math.random() * Math.PI * 2,
-            });
-          } else {
-            if (sprite.material?.map) sprite.material.map.dispose();
-            if (sprite.material) sprite.material.dispose();
-          }
-        });
-
         const updatesByBubble = pendingIntegrations.reduce((acc, item) => {
-          if (!acc[item.bubbleId]) acc[item.bubbleId] = [];
-          acc[item.bubbleId].push(item.tag);
+          const uniqueTags = acc[item.bubbleId] || new Set();
+          item.tags.forEach((tag) => uniqueTags.add(tag));
+          acc[item.bubbleId] = uniqueTags;
           return acc;
         }, {});
 
+        pendingIntegrations.forEach(({ sprites, bubbleId, cluster }) => {
+          seedClustersRef.current = seedClustersRef.current.filter((entry) => entry !== cluster);
+          seedGroupRef.current.remove(cluster.group);
+          cluster.group.children
+            .filter((child) => child.userData?.isClusterLines)
+            .forEach((line) => {
+              if (line.material) line.material.dispose();
+              if (line.geometry) line.geometry.dispose();
+            });
+
+          const targetNest = bubbleTagGroupsRef.current.get(bubbleId);
+          if (targetNest) {
+            sprites.forEach((sprite) => {
+              sprite.position.set((Math.random() - 0.5) * 0.8, (Math.random() - 0.5) * 0.8, (Math.random() - 0.5) * 0.8);
+              sprite.scale.multiplyScalar(0.7);
+              sprite.material.opacity = 0.95;
+              targetNest.add(sprite);
+              settledSeedsRef.current.push({
+                bubbleId,
+                sprite,
+                velocity: new THREE.Vector3((Math.random() - 0.5) * 0.003, (Math.random() - 0.5) * 0.003, (Math.random() - 0.5) * 0.003),
+                drift: Math.random() * Math.PI * 2,
+              });
+            });
+          } else {
+            sprites.forEach((sprite) => {
+              if (sprite.material?.map) sprite.material.map.dispose();
+              if (sprite.material) sprite.material.dispose();
+            });
+          }
+        });
+
         setBubbles((prev) => prev.map((bubble) => {
-          const incoming = updatesByBubble[bubble.id];
-          if (!incoming) return bubble;
-          const nextSeeds = Array.from(new Set([...(bubble.seedTags || ensureTags(bubble.note, bubble.title)), ...incoming]));
+          const incomingSet = updatesByBubble[bubble.id];
+          if (!incomingSet) return bubble;
+          const nextSeeds = Array.from(new Set([...(bubble.seedTags || ensureTags(bubble.note, bubble.title)), ...incomingSet]));
           return { ...bubble, seedTags: nextSeeds };
         }));
 
-        const mergedTags = pendingIntegrations.map((item) => item.tag);
-        logEvent(`Les tags ${mergedTags.join(' ')} se déposent dans une bulle.`);
+        const mergedTags = pendingIntegrations.flatMap((item) => item.tags);
+        logEvent(`La grappe ${mergedTags.join(' ')} est absorbée par une bulle.`);
       }
 
       settledSeedsRef.current.forEach((floater) => {
@@ -596,11 +652,14 @@ export default function App() {
       starMat.dispose();
       lineGeom.dispose();
       lineMaterial.dispose();
-      seedParticlesRef.current.forEach(({ sprite }) => {
-        if (sprite.material?.map) sprite.material.map.dispose();
-        if (sprite.material) sprite.material.dispose();
+      seedClustersRef.current.forEach((cluster) => {
+        cluster.group.children.forEach((child) => {
+          if (child.material?.map) child.material.map.dispose();
+          if (child.material) child.material.dispose();
+          if (child.geometry) child.geometry.dispose();
+        });
       });
-      seedParticlesRef.current = [];
+      seedClustersRef.current = [];
       settledSeedsRef.current.forEach(({ sprite }) => {
         if (sprite.material?.map) sprite.material.map.dispose();
         if (sprite.material) sprite.material.dispose();
