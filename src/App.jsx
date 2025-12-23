@@ -172,6 +172,7 @@ export default function App() {
   const longPressTriggeredRef = useRef(false);
   const pointerOriginRef = useRef({ x: 0, y: 0 });
   const pointerTargetRef = useRef(null);
+  const restoreControlsRef = useRef(null);
 
   const interiorRendererRef = useRef(null);
   const interiorSceneRef = useRef(null);
@@ -439,9 +440,34 @@ export default function App() {
     controls.zoomSpeed = 0.65;
     controlsRef.current = controls;
 
+    const releaseControls = () => {
+      if (restoreControlsRef.current) {
+        restoreControlsRef.current();
+        restoreControlsRef.current = null;
+      }
+    };
+
+    const pauseControls = () => {
+      if (!controlsRef.current) return;
+      const previous = {
+        rotate: controlsRef.current.enableRotate,
+        pan: controlsRef.current.enablePan,
+        zoom: controlsRef.current.enableZoom,
+      };
+      controlsRef.current.enableRotate = false;
+      controlsRef.current.enablePan = false;
+      controlsRef.current.enableZoom = false;
+      restoreControlsRef.current = () => {
+        controlsRef.current.enableRotate = previous.rotate;
+        controlsRef.current.enablePan = previous.pan;
+        controlsRef.current.enableZoom = previous.zoom;
+      };
+    };
+
     const raycaster = new THREE.Raycaster();
     const pointer = new THREE.Vector2();
-    const movementThreshold = 8;
+    const movementThreshold = 12;
+    const preventContextMenu = (event) => event.preventDefault();
 
     const onPointerDown = (event) => {
       const rect = sceneContainerRef.current?.getBoundingClientRect();
@@ -449,17 +475,20 @@ export default function App() {
       pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
       pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
       raycaster.setFromCamera(pointer, camera);
-      const hits = raycaster.intersectObjects(atoms);
+      const hits = raycaster.intersectObjects(atoms, true);
       if (hits.length) {
         const target = hits[0].object;
         focusBubble(target);
         longPressTriggeredRef.current = false;
         pointerOriginRef.current = { x: event.clientX, y: event.clientY };
         pointerTargetRef.current = target;
+        releaseControls();
+        pauseControls();
         if (longPressTimeoutRef.current) clearTimeout(longPressTimeoutRef.current);
         longPressTimeoutRef.current = setTimeout(() => {
           if (pointerTargetRef.current === target && !longPressTriggeredRef.current) {
             longPressTriggeredRef.current = true;
+            releaseControls();
             handleEnter();
           }
         }, 650);
@@ -473,6 +502,7 @@ export default function App() {
       }
       longPressTriggeredRef.current = false;
       pointerTargetRef.current = null;
+      releaseControls();
     };
 
     const onPointerMove = (event) => {
@@ -492,6 +522,7 @@ export default function App() {
     renderer.domElement.addEventListener('pointerup', onPointerUp);
     renderer.domElement.addEventListener('pointerleave', onPointerOut);
     renderer.domElement.addEventListener('pointercancel', onPointerOut);
+    renderer.domElement.addEventListener('contextmenu', preventContextMenu);
     const resizeObserver = new ResizeObserver(updateSize);
     resizeObserver.observe(sceneContainerRef.current);
     window.addEventListener('resize', updateSize);
@@ -534,9 +565,11 @@ export default function App() {
       renderer.domElement.removeEventListener('pointerup', onPointerUp);
       renderer.domElement.removeEventListener('pointerleave', onPointerOut);
       renderer.domElement.removeEventListener('pointercancel', onPointerOut);
+      renderer.domElement.removeEventListener('contextmenu', preventContextMenu);
       resizeObserver.disconnect();
       window.removeEventListener('resize', updateSize);
       if (frameIdRef.current) cancelAnimationFrame(frameIdRef.current);
+      releaseControls();
       controls.dispose();
       geometry.dispose();
       starGeo.dispose();
@@ -610,10 +643,6 @@ export default function App() {
       const seedNetwork = createMiniNetwork(initialTags);
       if (seedNetwork) {
         logSync(`Texte source (${initialTags.join(' ')}) transmuté puis expédié.`);
-        const timeout = setTimeout(() => {
-          discardNetwork(seedNetwork);
-        }, 4200);
-        syncTimeoutsRef.current.push(timeout);
       }
     }
 

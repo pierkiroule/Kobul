@@ -279,6 +279,12 @@ button:active {
   background: radial-gradient(circle at 30% 30%, rgba(0, 214, 255, 0.12), rgba(5, 10, 22, 0.9));
 }
 
+.interior-viewport canvas {
+  width: 100% !important;
+  height: 100% !important;
+  display: block;
+}
+
 .tag-cloud {
   display: flex;
   flex-wrap: wrap;
