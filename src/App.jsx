@@ -411,8 +411,30 @@ export default function App() {
     pendingEntryRef.current = false;
   };
 
+  const moveCameraToBubbleCenter = (bubbleMeta, duration = 1.15) => {
+    if (!bubbleMeta || !cameraRef.current || !controlsRef.current) return;
+    const targetMesh = atomsRef.current.find((mesh) => mesh.userData.meta.id === bubbleMeta.id);
+    if (!targetMesh) return;
+    const { position } = targetMesh;
+
+    gsap.to(cameraRef.current.position, {
+      x: position.x,
+      y: position.y,
+      z: position.z,
+      duration,
+      ease: 'power2.inOut',
+    });
+    gsap.to(controlsRef.current.target, {
+      x: position.x,
+      y: position.y,
+      z: position.z,
+      duration,
+      ease: 'power2.inOut',
+    });
+  };
+
   const focusBubble = (mesh) => {
-    if (!mesh || !cameraRef.current || !controlsRef.current) return;
+    if (!mesh) return;
     const meta = mesh.userData.meta;
     setFocusedBubble(meta);
     setIsInteriorOpen(false);
@@ -420,20 +442,7 @@ export default function App() {
     focusedBubbleRef.current = meta;
     pendingEntryRef.current = true;
 
-    gsap.to(cameraRef.current.position, {
-      x: mesh.position.x + 0.6,
-      y: mesh.position.y + 0.4,
-      z: mesh.position.z + 1.1,
-      duration: 1.3,
-      ease: 'power2.inOut',
-    });
-    gsap.to(controlsRef.current.target, {
-      x: mesh.position.x,
-      y: mesh.position.y,
-      z: mesh.position.z,
-      duration: 1.3,
-      ease: 'power2.inOut',
-    });
+    moveCameraToBubbleCenter(meta);
   };
 
   useEffect(() => {
@@ -631,7 +640,7 @@ export default function App() {
         const target = atoms.find((mesh) => mesh.userData.meta.id === targetBubble.id);
         if (target) {
           const distance = camera.position.distanceTo(target.position);
-          if (distance <= 1.08) {
+          if (distance <= 0.12) {
             pendingEntryRef.current = false;
             setIsInteriorOpen(true);
             logEvent(`${targetBubble.title} ouverte : immersion 360° enclenchée.`);
@@ -1038,6 +1047,7 @@ export default function App() {
 
   const handleEnterInterior = () => {
     if (!focusedBubble) return;
+    moveCameraToBubbleCenter(focusedBubble, 0.8);
     pendingEntryRef.current = false;
     setIsInteriorOpen(true);
     logEvent(`${focusedBubble.title} ouverte manuellement : immersion 360°.`);
