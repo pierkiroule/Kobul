@@ -246,6 +246,76 @@ function buildLandscape(accentColor, random) {
   };
 }
 
+function buildBubblePattern(accentColor, seed) {
+  const canvas = document.createElement('canvas');
+  canvas.width = 512;
+  canvas.height = 512;
+  const ctx = canvas.getContext('2d');
+  const random = createSeededRandom(seed);
+
+  const base = new THREE.Color(accentColor);
+  const dark = base.clone().lerp(new THREE.Color(0x030710), 0.65).getStyle();
+  const mid = base.clone().lerp(new THREE.Color(0xffffff), 0.16).getStyle();
+  const glow = base.clone().lerp(new THREE.Color(0xffffff), 0.4).getStyle();
+
+  const radial = ctx.createRadialGradient(256, 256, 60, 256, 256, 320);
+  radial.addColorStop(0, glow);
+  radial.addColorStop(0.45, mid);
+  radial.addColorStop(1, dark);
+  ctx.fillStyle = radial;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  ctx.globalAlpha = 0.2;
+  for (let i = 0; i < 16; i += 1) {
+    const bandOffset = random() * Math.PI * 2;
+    const bandThickness = 14 + random() * 28;
+    ctx.beginPath();
+    for (let x = 0; x <= canvas.width; x += 4) {
+      const t = (x / canvas.width) * Math.PI * 2 + bandOffset;
+      const y = canvas.height / 2 + Math.sin(t * (1.2 + random() * 0.4)) * (bandThickness * 2);
+      ctx.lineTo(x, y + Math.cos(t * 2) * bandThickness * 0.3);
+    }
+    ctx.strokeStyle = base.clone().offsetHSL(0.02, 0.05, 0.08).getStyle();
+    ctx.lineWidth = bandThickness * 0.5;
+    ctx.stroke();
+  }
+
+  ctx.globalAlpha = 0.65;
+  for (let i = 0; i < 90; i += 1) {
+    const radius = 6 + random() * 18;
+    const x = random() * canvas.width;
+    const y = random() * canvas.height;
+    const gradient = ctx.createRadialGradient(x, y, 0, x, y, radius);
+    gradient.addColorStop(0, glow);
+    gradient.addColorStop(1, 'transparent');
+    ctx.fillStyle = gradient;
+    ctx.beginPath();
+    ctx.arc(x, y, radius, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  ctx.globalAlpha = 1;
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.18)';
+  ctx.lineWidth = 1.4;
+  for (let i = 0; i < 5; i += 1) {
+    const rx = canvas.width * (0.22 + random() * 0.56);
+    const ry = canvas.height * (0.22 + random() * 0.56);
+    const cx = canvas.width * (0.2 + random() * 0.6);
+    const cy = canvas.height * (0.2 + random() * 0.6);
+    ctx.beginPath();
+    ctx.ellipse(cx, cy, rx, ry, random() * Math.PI, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.RepeatWrapping;
+  texture.repeat.set(1, 1);
+  texture.needsUpdate = true;
+  return texture;
+}
+
 function ensureTags(content, fallbackTitle = '') {
   const tokens = tokenizeText(content || '');
   const titleTokens = tokenizeText(fallbackTitle || '');
@@ -540,16 +610,14 @@ export default function App() {
     bubbleTagGroupsRef.current = new Map();
 
     bubbles.forEach((bubble) => {
-      const material = new THREE.MeshPhysicalMaterial({
-        color: bubble.color,
-        roughness: 0.2,
-        metalness: 0.08,
-        transmission: 0.78,
-        thickness: 0.9,
-        clearcoat: 1,
-        clearcoatRoughness: 0.05,
-        emissive: bubble.color,
-        emissiveIntensity: 0.15,
+      const pattern = buildBubblePattern(bubble.color, `${bubble.id}-${bubble.createdAt}`);
+      const material = new THREE.MeshStandardMaterial({
+        color: new THREE.Color(bubble.color).lerp(new THREE.Color(0x0b1525), 0.12),
+        map: pattern,
+        emissive: new THREE.Color(bubble.color).multiplyScalar(0.18),
+        emissiveMap: pattern,
+        roughness: 0.42,
+        metalness: 0.12,
       });
       const mesh = new THREE.Mesh(geometry, material);
       mesh.position.copy(bubble.position);
@@ -872,7 +940,13 @@ export default function App() {
         });
       });
       bubbleTagGroupsRef.current = new Map();
-      atoms.forEach((atom) => atom.material.dispose());
+      atoms.forEach((atom) => {
+        if (atom.material?.map) atom.material.map.dispose();
+        if (atom.material?.emissiveMap && atom.material.emissiveMap !== atom.material.map) {
+          atom.material.emissiveMap.dispose();
+        }
+        atom.material.dispose();
+      });
       renderer.dispose();
       if (sceneContainerRef.current?.contains(renderer.domElement)) {
         sceneContainerRef.current.removeChild(renderer.domElement);
