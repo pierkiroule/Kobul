@@ -106,6 +106,7 @@ function generateBubbles() {
       note: poeticTexts[index],
       skyboxUrl: '',
       fx: '',
+      seedTags: tokenizeText(poeticTexts[index]),
       connections: [],
       color: palette[index % palette.length],
       position,
@@ -209,6 +210,7 @@ export default function App() {
     const note = newBubbleData.note.trim();
     const skyboxUrl = newBubbleData.skyboxUrl.trim();
     const fx = newBubbleData.fx.trim();
+    const seedTags = tokenizeText(note);
 
     setBubbles((prev) => {
       const nextIndex = prev.length + 1;
@@ -245,6 +247,7 @@ export default function App() {
         note,
         skyboxUrl,
         fx,
+        seedTags,
         connections: [...selectedConnections],
         color,
         position,
@@ -528,6 +531,21 @@ export default function App() {
     interiorNetworkGroupRef.current = networkGroup;
     miniNetworksRef.current = [];
     syncTimeoutsRef.current = [];
+
+    const initialTags = (focusedBubble.seedTags && focusedBubble.seedTags.length > 0)
+      ? focusedBubble.seedTags
+      : tokenizeText(focusedBubble.note || '');
+
+    if (initialTags.length > 0) {
+      const seedNetwork = createMiniNetwork(initialTags);
+      if (seedNetwork) {
+        logSync(`Texte source (${initialTags.join(' ')}) transmuté puis expédié.`);
+        const timeout = setTimeout(() => {
+          discardNetwork(seedNetwork);
+        }, 4200);
+        syncTimeoutsRef.current.push(timeout);
+      }
+    }
 
     const resizeObserver = new ResizeObserver(updateSize);
     resizeObserver.observe(interiorContainerRef.current);
