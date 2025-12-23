@@ -86,6 +86,15 @@ function createTextSprite(text, color = '#e8f7ff') {
   return sprite;
 }
 
+function ensureTags(content, fallbackTitle = '') {
+  const tokens = tokenizeText(content || '');
+  const titleTokens = tokenizeText(fallbackTitle || '');
+  const defaults = ['#bulle', '#réseau', '✨'];
+  if (tokens.length > 0) return tokens;
+  if (titleTokens.length > 0) return titleTokens;
+  return defaults;
+}
+
 function generateBubbles() {
   const count = poeticTitles.length;
   const goldenAngle = Math.PI * (3 - Math.sqrt(5));
@@ -106,7 +115,7 @@ function generateBubbles() {
       note: poeticTexts[index],
       skyboxUrl: '',
       fx: '',
-      seedTags: tokenizeText(poeticTexts[index]),
+      seedTags: ensureTags(poeticTexts[index], poeticTitles[index]),
       createdAt: Date.now() - 1000 * 60 * 20 - index * 1000,
       isRecent: false,
       connections: [],
@@ -160,7 +169,10 @@ export default function App() {
   const haloRef = useRef(null);
   const frameIdRef = useRef(null);
   const longPressTimeoutRef = useRef(null);
+  const longPressTriggeredRef = useRef(false);
+  const pointerOriginRef = useRef({ x: 0, y: 0 });
   const pointerTargetRef = useRef(null);
+  const restoreControlsRef = useRef(null);
 
   const interiorRendererRef = useRef(null);
   const interiorSceneRef = useRef(null);
@@ -215,7 +227,7 @@ export default function App() {
     const note = newBubbleData.note.trim();
     const skyboxUrl = newBubbleData.skyboxUrl.trim();
     const fx = newBubbleData.fx.trim();
-    const seedTags = tokenizeText(note);
+    const seedTags = ensureTags(note, title);
 
     setBubbles((prev) => {
       const nextIndex = prev.length + 1;
@@ -428,8 +440,34 @@ export default function App() {
     controls.zoomSpeed = 0.65;
     controlsRef.current = controls;
 
+    const releaseControls = () => {
+      if (restoreControlsRef.current) {
+        restoreControlsRef.current();
+        restoreControlsRef.current = null;
+      }
+    };
+
+    const pauseControls = () => {
+      if (!controlsRef.current) return;
+      const previous = {
+        rotate: controlsRef.current.enableRotate,
+        pan: controlsRef.current.enablePan,
+        zoom: controlsRef.current.enableZoom,
+      };
+      controlsRef.current.enableRotate = false;
+      controlsRef.current.enablePan = false;
+      controlsRef.current.enableZoom = false;
+      restoreControlsRef.current = () => {
+        controlsRef.current.enableRotate = previous.rotate;
+        controlsRef.current.enablePan = previous.pan;
+        controlsRef.current.enableZoom = previous.zoom;
+      };
+    };
+
     const raycaster = new THREE.Raycaster();
     const pointer = new THREE.Vector2();
+    const movementThreshold = 12;
+    const preventContextMenu = (event) => event.preventDefault();
 
     const onPointerDown = (event) => {
       const rect = sceneContainerRef.current?.getBoundingClientRect();
@@ -437,14 +475,20 @@ export default function App() {
       pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
       pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
       raycaster.setFromCamera(pointer, camera);
-      const hits = raycaster.intersectObjects(atoms);
+      const hits = raycaster.intersectObjects(atoms, true);
       if (hits.length) {
         const target = hits[0].object;
         focusBubble(target);
+        longPressTriggeredRef.current = false;
+        pointerOriginRef.current = { x: event.clientX, y: event.clientY };
         pointerTargetRef.current = target;
+        releaseControls();
+        pauseControls();
         if (longPressTimeoutRef.current) clearTimeout(longPressTimeoutRef.current);
         longPressTimeoutRef.current = setTimeout(() => {
-          if (pointerTargetRef.current === target) {
+          if (pointerTargetRef.current === target && !longPressTriggeredRef.current) {
+            longPressTriggeredRef.current = true;
+            releaseControls();
             handleEnter();
           }
         }, 650);
@@ -456,16 +500,29 @@ export default function App() {
         clearTimeout(longPressTimeoutRef.current);
         longPressTimeoutRef.current = null;
       }
+      longPressTriggeredRef.current = false;
       pointerTargetRef.current = null;
+      releaseControls();
+    };
+
+    const onPointerMove = (event) => {
+      if (!pointerTargetRef.current || longPressTriggeredRef.current) return;
+      const dx = event.clientX - pointerOriginRef.current.x;
+      const dy = event.clientY - pointerOriginRef.current.y;
+      if (Math.hypot(dx, dy) > movementThreshold) {
+        clearLongPress();
+      }
     };
 
     const onPointerUp = () => clearLongPress();
     const onPointerOut = () => clearLongPress();
 
     renderer.domElement.addEventListener('pointerdown', onPointerDown);
+    renderer.domElement.addEventListener('pointermove', onPointerMove);
     renderer.domElement.addEventListener('pointerup', onPointerUp);
     renderer.domElement.addEventListener('pointerleave', onPointerOut);
     renderer.domElement.addEventListener('pointercancel', onPointerOut);
+    renderer.domElement.addEventListener('contextmenu', preventContextMenu);
     const resizeObserver = new ResizeObserver(updateSize);
     resizeObserver.observe(sceneContainerRef.current);
     window.addEventListener('resize', updateSize);
@@ -504,12 +561,15 @@ export default function App() {
 
     return () => {
       renderer.domElement.removeEventListener('pointerdown', onPointerDown);
+      renderer.domElement.removeEventListener('pointermove', onPointerMove);
       renderer.domElement.removeEventListener('pointerup', onPointerUp);
       renderer.domElement.removeEventListener('pointerleave', onPointerOut);
       renderer.domElement.removeEventListener('pointercancel', onPointerOut);
+      renderer.domElement.removeEventListener('contextmenu', preventContextMenu);
       resizeObserver.disconnect();
       window.removeEventListener('resize', updateSize);
       if (frameIdRef.current) cancelAnimationFrame(frameIdRef.current);
+      releaseControls();
       controls.dispose();
       geometry.dispose();
       starGeo.dispose();
@@ -577,18 +637,12 @@ export default function App() {
     miniNetworksRef.current = [];
     syncTimeoutsRef.current = [];
 
-    const initialTags = (focusedBubble.seedTags && focusedBubble.seedTags.length > 0)
-      ? focusedBubble.seedTags
-      : tokenizeText(focusedBubble.note || '');
+    const initialTags = ensureTags(focusedBubble.note, focusedBubble.title);
 
     if (initialTags.length > 0) {
       const seedNetwork = createMiniNetwork(initialTags);
       if (seedNetwork) {
         logSync(`Texte source (${initialTags.join(' ')}) transmuté puis expédié.`);
-        const timeout = setTimeout(() => {
-          discardNetwork(seedNetwork);
-        }, 4200);
-        syncTimeoutsRef.current.push(timeout);
       }
     }
 
@@ -817,6 +871,11 @@ export default function App() {
                   de chaque synchro. Le texte brut est détruit après transmutation.
                 </p>
                 {focusedBubble.note && <p className="muted">{focusedBubble.note}</p>}
+                <div className="tag-cloud" aria-label="Tags initiaux de la bulle">
+                  {ensureTags(focusedBubble.note, focusedBubble.title).map((tag) => (
+                    <span key={tag} className="chip subtle">{tag}</span>
+                  ))}
+                </div>
                 <div className="bubble-meta">
                   <span className="chip">Skybox : {focusedBubble.skyboxUrl || 'à venir'}</span>
                   <span className="chip">FX : {focusedBubble.fx || 'silence'}</span>
@@ -828,7 +887,13 @@ export default function App() {
             </div>
 
             <div className="interior-body">
-              <div className="interior-viewport" ref={interiorContainerRef} />
+              <div className="viewport-panel">
+                <div className="panel-header">
+                  <p className="eyebrow">Mini réseau 3D</p>
+                  <p className="muted">Tags + émojis transmutés dans la bulle.</p>
+                </div>
+                <div className="interior-viewport" ref={interiorContainerRef} aria-label="Mini réseau three.js" />
+              </div>
               <form className="note-form" onSubmit={handleAddNote}>
                 <label htmlFor="note">Texte à semer</label>
                 <input
