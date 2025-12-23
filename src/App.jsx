@@ -632,13 +632,25 @@ export default function App() {
   }, [isModalOpen]);
 
   useEffect(() => {
-    if (!selectedBubble || !interiorSceneRef.current) return;
+    if (!isModalOpen || !selectedBubble || !interiorSceneRef.current) return undefined;
 
     const loader = new THREE.CubeTextureLoader();
-    const texture = loader.load(selectedBubble.skybox);
-    texture.colorSpace = THREE.SRGBColorSpace;
-    interiorSceneRef.current.background = texture;
-  }, [selectedBubble]);
+    loader.setCrossOrigin('anonymous');
+
+    const texture = loader.load(selectedBubble.skybox, (cube) => {
+      cube.colorSpace = THREE.SRGBColorSpace;
+      if (interiorSceneRef.current) {
+        interiorSceneRef.current.background = cube;
+      }
+    });
+
+    return () => {
+      if (interiorSceneRef.current && interiorSceneRef.current.background === texture) {
+        interiorSceneRef.current.background = null;
+      }
+      texture.dispose();
+    };
+  }, [isModalOpen, selectedBubble]);
 
   const handleEnterTap = () => {
     if (!selectedBubble) {
