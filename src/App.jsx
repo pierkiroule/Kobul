@@ -1228,22 +1228,28 @@ export default function App() {
     return group;
   };
 
+  const primaryActionLabel = isInteriorOpen && focusedBubble ? 'Sortir de la bulle' : 'Revenir au réseau';
+  const primaryActionHandler = isInteriorOpen && focusedBubble ? handleExitInterior : resetView;
+
+  const tagPreview = (focusedBubble?.seedTags || ensureTags(focusedBubble?.note, focusedBubble?.title)) || [];
+  const previewTags = tagPreview.slice(0, 3);
+  const remainingTagCount = Math.max(tagPreview.length - previewTags.length, 0);
+
   return (
     <div className="shell">
       <aside className="sidebar">
         <div className="sidebar-block">
           <p className="eyebrow">EchoBulle</p>
           <h1>Réseau 3D unique et intérieur</h1>
-          <p className="lede">
-            Sélectionnez une bulle, approchez-la : dès que la caméra touche sa surface, l'immersion 360° s'ouvre sur
-            un paysage génératif propre. Le réseau reste présent en toile de fond tandis que les tags et émojis
-            gravitent pour rejoindre les bulles.
-          </p>
+          <p className="lede">Un terrain paisible pour déposer des mots, sentir leur résonance et entrer dans un panorama dédié.</p>
+          <ul className="mini-steps">
+            <li>Choisir une bulle et s&apos;en approcher.</li>
+            <li>Lâcher des tags, les regarder dériver.</li>
+            <li>Entrer pour l&apos;immersion 360°.</li>
+          </ul>
           <div className="control-row">
-            <button type="button" className="primary" onClick={resetView}>Revenir au réseau</button>
-            <button type="button" className="ghost" onClick={handleExitInterior} disabled={!focusedBubble}>
-              Quitter la bulle
-            </button>
+            <button type="button" className="primary" onClick={primaryActionHandler}>{primaryActionLabel}</button>
+            <button type="button" className="ghost" onClick={resetView}>Réinitialiser la vue</button>
           </div>
         </div>
 
@@ -1266,9 +1272,10 @@ export default function App() {
               <h3>{focusedBubble.title}</h3>
               <p className="muted">{focusedBubble.note || 'Silence intérieur à explorer.'}</p>
               <div className="tag-cloud" aria-label="Tags de la bulle">
-                {(focusedBubble.seedTags || ensureTags(focusedBubble.note, focusedBubble.title)).map((tag) => (
+                {previewTags.map((tag) => (
                   <span key={tag} className="chip subtle">{tag}</span>
                 ))}
+                {remainingTagCount > 0 && <span className="chip subtle">+{remainingTagCount}</span>}
               </div>
               <div className="bubble-meta">
                 <span className="chip">Skybox : paysage généré</span>
@@ -1291,7 +1298,7 @@ export default function App() {
         <div className="sidebar-block sync-feed">
           <p className="eyebrow">Flux</p>
           {syncEvents.length === 0 ? (
-            <p className="muted">Les graines déposées et intégrations apparaissent ici.</p>
+            <p className="muted">Lâchez des tags pour voir leurs trajectoires et intégrations ici.</p>
           ) : (
             <ul>
               {syncEvents.map((event) => (
@@ -1312,9 +1319,6 @@ export default function App() {
               </div>
               <div className="panel-actions">
                 <button type="button" className="ghost" onClick={resetView}>Recentrer</button>
-                <button type="button" className="ghost" onClick={handleExitInterior} disabled={!focusedBubble}>
-                  Sortir d'une bulle
-                </button>
               </div>
             </div>
             <div ref={sceneContainerRef} className="experience" />
@@ -1326,7 +1330,7 @@ export default function App() {
                 <p className="eyebrow">Intérieur</p>
                 <h3>{focusedBubble ? focusedBubble.title : 'Choisissez une bulle'}</h3>
               </div>
-              {focusedBubble && (
+              {focusedBubble && isInteriorOpen && (
                 <div className="panel-actions">
                   <span className="chip subtle">Caméra 360° · Gyro</span>
                   <button type="button" className="ghost" onClick={handleExitInterior}>Sortir</button>
