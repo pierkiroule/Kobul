@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import gsap from 'gsap';
@@ -168,37 +168,28 @@ export default function App() {
   const atomsRef = useRef([]);
   const haloRef = useRef(null);
   const frameIdRef = useRef(null);
-  const longPressTimeoutRef = useRef(null);
-  const longPressTriggeredRef = useRef(false);
-  const pointerOriginRef = useRef({ x: 0, y: 0 });
-  const pointerTargetRef = useRef(null);
+  const seedGroupRef = useRef(null);
+  const seedClustersRef = useRef([]);
+  const settledSeedsRef = useRef([]);
+  const bubbleTagGroupsRef = useRef(new Map());
   const restoreControlsRef = useRef(null);
 
   const interiorRendererRef = useRef(null);
   const interiorSceneRef = useRef(null);
   const interiorCameraRef = useRef(null);
+  const interiorOrientationRef = useRef({ active: false, quaternion: new THREE.Quaternion(), cleanup: null });
   const interiorNetworkGroupRef = useRef(null);
   const miniNetworksRef = useRef([]);
-  const syncTimeoutsRef = useRef([]);
   const interiorFrameIdRef = useRef(null);
+  const interiorFallbackViewRef = useRef({ yaw: 0, pitch: 0, dragging: false, lastX: 0, lastY: 0 });
+  const interiorAutoDriftRef = useRef(0);
 
   const focusedBubbleRef = useRef(null);
 
   const [bubbles, setBubbles] = useState(generateBubbles);
-  const [filterMode, setFilterMode] = useState('all');
-
   const [focusedBubble, setFocusedBubble] = useState(null);
-  const [showEntryPrompt, setShowEntryPrompt] = useState(false);
   const [isInteriorOpen, setIsInteriorOpen] = useState(false);
-  const [showAddModal, setShowAddModal] = useState(false);
-  const [newNote, setNewNote] = useState('');
-  const [newBubbleData, setNewBubbleData] = useState({
-    title: '',
-    note: '',
-    skyboxUrl: '',
-    fx: '',
-    connections: [],
-  });
+  const [seedInput, setSeedInput] = useState('');
 
   const [syncEvents, setSyncEvents] = useState([]);
 
@@ -206,97 +197,102 @@ export default function App() {
     focusedBubbleRef.current = focusedBubble;
   }, [focusedBubble]);
 
+  const logEvent = (message) => {
+    setSyncEvents((prev) => {
+      const next = [{ id: uniqueId(), message }, ...prev];
+      return next.slice(0, 6);
+    });
+  };
+
+  const releaseSeeds = (tags) => {
+    if (!seedGroupRef.current || tags.length === 0) return;
+    const uniqueTags = Array.from(new Set(tags));
+
+    const cluster = new THREE.Group();
+    cluster.position.set((Math.random() - 0.5) * 8, (Math.random() - 0.5) * 5, (Math.random() - 0.5) * 8);
+
+    const nodes = uniqueTags.map((tag, index) => {
+      const sprite = createTextSprite(tag, '#fdfbff');
+      const radius = 1.05;
+      const jitter = 0.35;
+      const seed = new THREE.Vector3(Math.random() - 0.5, Math.random() - 0.5, Math.random() - 0.5).normalize();
+      seed.multiplyScalar(radius * (0.7 + Math.random() * 0.6));
+      const offset = seed.add(
+        new THREE.Vector3(
+          (Math.random() - 0.5) * jitter,
+          (Math.random() - 0.5) * jitter,
+          (Math.random() - 0.5) * jitter,
+        ),
+      );
+      sprite.position.copy(offset);
+      sprite.userData.tag = tag;
+      sprite.userData.offset = offset;
+      sprite.userData.wobble = Math.random() * Math.PI * 2 + index;
+      cluster.add(sprite);
+      return sprite;
+    });
+
+    if (nodes.length > 1) {
+      const positions = [];
+      nodes.forEach((node, idx) => {
+        const next = nodes[(idx + 1) % nodes.length];
+        positions.push(node.position.x, node.position.y, node.position.z, next.position.x, next.position.y, next.position.z);
+        if (nodes.length > 3 && idx % 2 === 0) {
+          const cross = nodes[(idx + 2) % nodes.length];
+          positions.push(node.position.x, node.position.y, node.position.z, cross.position.x, cross.position.y, cross.position.z);
+        }
+      });
+      const lineGeom = new THREE.BufferGeometry();
+      lineGeom.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+      const lineMat = new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.22 });
+      const lines = new THREE.LineSegments(lineGeom, lineMat);
+      lines.userData.isClusterLines = true;
+      cluster.add(lines);
+    }
+
+    seedGroupRef.current.add(cluster);
+
+    seedClustersRef.current.push({
+      group: cluster,
+      nodes,
+      tags: uniqueTags,
+      velocity: new THREE.Vector3((Math.random() - 0.5) * 0.009, (Math.random() - 0.5) * 0.007, (Math.random() - 0.5) * 0.009),
+      wander: Math.random() * Math.PI * 2,
+      orbitPhase: Math.random() * Math.PI * 2,
+      bounceHistory: new Set(),
+    });
+
+    logEvent(`Grappe (${uniqueTags.join(' ')}) libérée, déjà reliée en mini réseau.`);
+  };
+
+  const handleSeedNetwork = (event) => {
+    event.preventDefault();
+    const tags = tokenizeText(seedInput);
+    if (tags.length === 0) return;
+    releaseSeeds(tags);
+    setSeedInput('');
+  };
+
   const resetView = () => {
     if (!cameraRef.current || !controlsRef.current) return;
     gsap.to(cameraRef.current.position, { x: 0, y: 5, z: 22, duration: 1.2, ease: 'power2.inOut' });
     gsap.to(controlsRef.current.target, { x: 0, y: 0, z: 0, duration: 1.2, ease: 'power2.inOut' });
     setFocusedBubble(null);
-    setShowEntryPrompt(false);
     focusedBubbleRef.current = null;
-  };
-
-  const handleAddBubble = () => {
-    setNewBubbleData({ title: '', note: '', skyboxUrl: '', fx: '', connections: [] });
-    setShowAddModal(true);
-  };
-
-  const handleCreateBubble = (event) => {
-    event.preventDefault();
-    const selectedConnections = newBubbleData.connections || [];
-    const title = newBubbleData.title.trim() || 'Bulle inédite';
-    const note = newBubbleData.note.trim();
-    const skyboxUrl = newBubbleData.skyboxUrl.trim();
-    const fx = newBubbleData.fx.trim();
-    const seedTags = ensureTags(note, title);
-
-    setBubbles((prev) => {
-      const nextIndex = prev.length + 1;
-      const id = `bulle-${nextIndex}`;
-      const color = palette[nextIndex % palette.length];
-
-      const anchors = prev.filter((bubble) => selectedConnections.includes(bubble.id));
-      const center = anchors.reduce((acc, bubble) => acc.add(bubble.position), new THREE.Vector3());
-      const position = anchors.length
-        ? center.divideScalar(anchors.length).add(new THREE.Vector3(
-          (Math.random() - 0.5) * 2.4,
-          (Math.random() - 0.5) * 1.6,
-          (Math.random() - 0.5) * 2.4,
-        ))
-        : (() => {
-          const angle = Math.random() * Math.PI * 2;
-          const radius = 9 + Math.random() * 6;
-          const height = (Math.random() - 0.5) * 6;
-          return new THREE.Vector3(
-            Math.cos(angle) * radius,
-            height,
-            Math.sin(angle) * radius,
-          );
-        })();
-
-      const updatedBubbles = prev.map((bubble) => {
-        if (!selectedConnections.includes(bubble.id)) return bubble;
-        return { ...bubble, connections: Array.from(new Set([...(bubble.connections || []), id])) };
-      });
-
-      const newBubble = {
-        id,
-        title,
-        note,
-        skyboxUrl,
-        fx,
-        seedTags,
-        connections: [...selectedConnections],
-        color,
-        position,
-        createdAt: Date.now(),
-        isRecent: true,
-      };
-
-      return [...updatedBubbles, newBubble];
-    });
-
-    setShowAddModal(false);
-  };
-
-  const toggleConnection = (id) => {
-    setNewBubbleData((prev) => {
-      const exists = prev.connections.includes(id);
-      const connections = exists ? prev.connections.filter((conn) => conn !== id) : [...prev.connections, id];
-      return { ...prev, connections };
-    });
   };
 
   const focusBubble = (mesh) => {
     if (!mesh || !cameraRef.current || !controlsRef.current) return;
     const meta = mesh.userData.meta;
     setFocusedBubble(meta);
-    setShowEntryPrompt(false);
+    setIsInteriorOpen(true);
+    setSyncEvents([]);
     focusedBubbleRef.current = meta;
 
     gsap.to(cameraRef.current.position, {
-      x: mesh.position.x + 2.2,
-      y: mesh.position.y + 1.2,
-      z: mesh.position.z + 4.8,
+      x: mesh.position.x + 0.6,
+      y: mesh.position.y + 0.4,
+      z: mesh.position.z + 1.1,
       duration: 1.3,
       ease: 'power2.inOut',
     });
@@ -309,18 +305,12 @@ export default function App() {
     });
   };
 
-  const visibleBubbles = useMemo(() => {
-    if (filterMode === 'recent') return bubbles.filter((bubble) => bubble.isRecent);
-    return bubbles;
-  }, [bubbles, filterMode]);
-
   useEffect(() => {
-    if (focusedBubble && !visibleBubbles.some((bubble) => bubble.id === focusedBubble.id)) {
+    if (focusedBubble && !bubbles.some((bubble) => bubble.id === focusedBubble.id)) {
       setFocusedBubble(null);
-      setShowEntryPrompt(false);
       focusedBubbleRef.current = null;
     }
-  }, [focusedBubble, visibleBubbles]);
+  }, [bubbles, focusedBubble]);
 
   useEffect(() => {
     if (!sceneContainerRef.current) return undefined;
@@ -368,8 +358,9 @@ export default function App() {
 
     const geometry = new THREE.SphereGeometry(1.1, 32, 32);
     const atoms = [];
+    bubbleTagGroupsRef.current = new Map();
 
-    visibleBubbles.forEach((bubble) => {
+    bubbles.forEach((bubble) => {
       const material = new THREE.MeshPhysicalMaterial({
         color: bubble.color,
         roughness: 0.2,
@@ -386,10 +377,20 @@ export default function App() {
       mesh.userData.meta = bubble;
       const light = new THREE.PointLight(bubble.color, 0.8, 7);
       mesh.add(light);
+      const tagNest = new THREE.Group();
+      tagNest.name = `tags-${bubble.id}`;
+      tagNest.userData.floaters = [];
+      mesh.add(tagNest);
+      bubbleTagGroupsRef.current.set(bubble.id, tagNest);
       scene.add(mesh);
       atoms.push(mesh);
     });
     atomsRef.current = atoms;
+
+    const seedGroup = new THREE.Group();
+    scene.add(seedGroup);
+    seedGroupRef.current = seedGroup;
+    seedClustersRef.current = [];
 
     const haloGeometry = new THREE.SphereGeometry(1.6, 42, 42);
     const haloMaterial = new THREE.MeshBasicMaterial({
@@ -408,9 +409,9 @@ export default function App() {
     const lineMaterial = new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.18 });
     const linkPositions = [];
     const addedPairs = new Set();
-    visibleBubbles.forEach((source) => {
+    bubbles.forEach((source) => {
       (source.connections || []).forEach((targetId) => {
-        const target = visibleBubbles.find((candidate) => candidate.id === targetId);
+        const target = bubbles.find((candidate) => candidate.id === targetId);
         if (!target) return;
         const key = [source.id, target.id].sort().join('->');
         if (addedPairs.has(key)) return;
@@ -440,33 +441,8 @@ export default function App() {
     controls.zoomSpeed = 0.65;
     controlsRef.current = controls;
 
-    const releaseControls = () => {
-      if (restoreControlsRef.current) {
-        restoreControlsRef.current();
-        restoreControlsRef.current = null;
-      }
-    };
-
-    const pauseControls = () => {
-      if (!controlsRef.current) return;
-      const previous = {
-        rotate: controlsRef.current.enableRotate,
-        pan: controlsRef.current.enablePan,
-        zoom: controlsRef.current.enableZoom,
-      };
-      controlsRef.current.enableRotate = false;
-      controlsRef.current.enablePan = false;
-      controlsRef.current.enableZoom = false;
-      restoreControlsRef.current = () => {
-        controlsRef.current.enableRotate = previous.rotate;
-        controlsRef.current.enablePan = previous.pan;
-        controlsRef.current.enableZoom = previous.zoom;
-      };
-    };
-
     const raycaster = new THREE.Raycaster();
     const pointer = new THREE.Vector2();
-    const movementThreshold = 12;
     const preventContextMenu = (event) => event.preventDefault();
 
     const onPointerDown = (event) => {
@@ -479,46 +455,12 @@ export default function App() {
       if (hits.length) {
         const target = hits[0].object;
         focusBubble(target);
-        longPressTriggeredRef.current = false;
-        pointerOriginRef.current = { x: event.clientX, y: event.clientY };
-        pointerTargetRef.current = target;
-        releaseControls();
-        pauseControls();
-        if (longPressTimeoutRef.current) clearTimeout(longPressTimeoutRef.current);
-        longPressTimeoutRef.current = setTimeout(() => {
-          if (pointerTargetRef.current === target && !longPressTriggeredRef.current) {
-            longPressTriggeredRef.current = true;
-            releaseControls();
-            handleEnter();
-          }
-        }, 650);
       }
     };
-
-    const clearLongPress = () => {
-      if (longPressTimeoutRef.current) {
-        clearTimeout(longPressTimeoutRef.current);
-        longPressTimeoutRef.current = null;
-      }
-      longPressTriggeredRef.current = false;
-      pointerTargetRef.current = null;
-      releaseControls();
-    };
-
-    const onPointerMove = (event) => {
-      if (!pointerTargetRef.current || longPressTriggeredRef.current) return;
-      const dx = event.clientX - pointerOriginRef.current.x;
-      const dy = event.clientY - pointerOriginRef.current.y;
-      if (Math.hypot(dx, dy) > movementThreshold) {
-        clearLongPress();
-      }
-    };
-
-    const onPointerUp = () => clearLongPress();
-    const onPointerOut = () => clearLongPress();
+    const onPointerUp = () => restoreControlsRef.current && restoreControlsRef.current();
+    const onPointerOut = () => restoreControlsRef.current && restoreControlsRef.current();
 
     renderer.domElement.addEventListener('pointerdown', onPointerDown);
-    renderer.domElement.addEventListener('pointermove', onPointerMove);
     renderer.domElement.addEventListener('pointerup', onPointerUp);
     renderer.domElement.addEventListener('pointerleave', onPointerOut);
     renderer.domElement.addEventListener('pointercancel', onPointerOut);
@@ -552,6 +494,147 @@ export default function App() {
         halo.visible = false;
       }
 
+      const pendingIntegrations = [];
+      seedClustersRef.current.forEach((cluster) => {
+        let nearest = null;
+        let nearestDistance = Infinity;
+        atoms.forEach((atom) => {
+          const distance = atom.position.distanceTo(cluster.group.position);
+          if (distance < nearestDistance) {
+            nearestDistance = distance;
+            nearest = atom;
+          }
+        });
+
+        const wanderStrength = 0.0015 + Math.sin(elapsed + cluster.wander) * 0.0008;
+        cluster.velocity.x += (Math.random() - 0.5) * wanderStrength * 0.22;
+        cluster.velocity.y += (Math.random() - 0.5) * wanderStrength * 0.22;
+        cluster.velocity.z += (Math.random() - 0.5) * wanderStrength * 0.22;
+
+        const orbitPush = new THREE.Vector3(
+          Math.sin(elapsed * 0.2 + cluster.orbitPhase),
+          Math.sin(elapsed * 0.16 + cluster.orbitPhase * 1.3) * 0.28,
+          Math.cos(elapsed * 0.2 + cluster.orbitPhase),
+        ).multiplyScalar(0.0013);
+        cluster.velocity.add(orbitPush);
+
+        const coreVector = cluster.group.position.clone().multiplyScalar(-1);
+        const coreDistance = Math.max(coreVector.length(), 0.001);
+        coreVector.normalize();
+        const corePull = Math.min(coreDistance / 16, 1) * 0.007;
+        cluster.velocity.addScaledVector(coreVector, corePull);
+
+        if (nearest) {
+          const direction = new THREE.Vector3().subVectors(nearest.position, cluster.group.position);
+          const distance = Math.max(direction.length(), 0.001);
+          direction.normalize();
+          const pull = 0.012 / distance;
+          cluster.velocity.addScaledVector(direction, pull);
+
+          if (distance < 1.2) {
+            const normal = new THREE.Vector3().subVectors(cluster.group.position, nearest.position).normalize();
+            const isNewBounce = !cluster.bounceHistory.has(nearest.userData.meta.id);
+
+            if (cluster.bounceHistory.size >= 3) {
+              const randomTarget = atoms[Math.floor(Math.random() * atoms.length)];
+              pendingIntegrations.push({
+                bubbleId: randomTarget?.userData.meta.id || nearest.userData.meta.id,
+                sprites: cluster.nodes,
+                tags: cluster.tags,
+                cluster,
+              });
+            } else {
+              if (isNewBounce) cluster.bounceHistory.add(nearest.userData.meta.id);
+              const reflected = cluster.velocity.clone().sub(normal.clone().multiplyScalar(2 * cluster.velocity.dot(normal)));
+              cluster.velocity.copy(reflected.multiplyScalar(0.9));
+              cluster.velocity.addScaledVector(normal, 0.018);
+            }
+          }
+        }
+
+        const maxSpeed = 0.02;
+        const speed = cluster.velocity.length();
+        if (speed > maxSpeed) {
+          cluster.velocity.multiplyScalar(maxSpeed / speed);
+        }
+
+        cluster.velocity.multiplyScalar(0.99);
+        cluster.group.position.add(cluster.velocity);
+
+        cluster.nodes.forEach((sprite) => {
+          const wobble = sprite.userData.wobble;
+      sprite.position.x = sprite.userData.offset.x + Math.sin(elapsed * 0.7 + wobble) * 0.06;
+      sprite.position.y = sprite.userData.offset.y + Math.cos(elapsed * 0.6 + wobble * 1.3) * 0.06;
+      sprite.position.z = sprite.userData.offset.z + Math.sin(elapsed * 0.5 + wobble * 0.7) * 0.06;
+      sprite.lookAt(camera.position);
+    });
+      });
+
+      if (pendingIntegrations.length > 0 && seedGroupRef.current) {
+        const updatesByBubble = pendingIntegrations.reduce((acc, item) => {
+          const uniqueTags = acc[item.bubbleId] || new Set();
+          item.tags.forEach((tag) => uniqueTags.add(tag));
+          acc[item.bubbleId] = uniqueTags;
+          return acc;
+        }, {});
+
+        pendingIntegrations.forEach(({ sprites, bubbleId, cluster }) => {
+          seedClustersRef.current = seedClustersRef.current.filter((entry) => entry !== cluster);
+          seedGroupRef.current.remove(cluster.group);
+          cluster.group.children
+            .filter((child) => child.userData?.isClusterLines)
+            .forEach((line) => {
+              if (line.material) line.material.dispose();
+              if (line.geometry) line.geometry.dispose();
+            });
+
+          const targetNest = bubbleTagGroupsRef.current.get(bubbleId);
+          if (targetNest) {
+            sprites.forEach((sprite) => {
+              sprite.position.set((Math.random() - 0.5) * 0.8, (Math.random() - 0.5) * 0.8, (Math.random() - 0.5) * 0.8);
+              sprite.scale.multiplyScalar(0.7);
+              sprite.material.opacity = 0.95;
+              targetNest.add(sprite);
+              settledSeedsRef.current.push({
+                bubbleId,
+                sprite,
+                velocity: new THREE.Vector3((Math.random() - 0.5) * 0.003, (Math.random() - 0.5) * 0.003, (Math.random() - 0.5) * 0.003),
+                drift: Math.random() * Math.PI * 2,
+              });
+            });
+          } else {
+            sprites.forEach((sprite) => {
+              if (sprite.material?.map) sprite.material.map.dispose();
+              if (sprite.material) sprite.material.dispose();
+            });
+          }
+        });
+
+        setBubbles((prev) => prev.map((bubble) => {
+          const incomingSet = updatesByBubble[bubble.id];
+          if (!incomingSet) return bubble;
+          const nextSeeds = Array.from(new Set([...(bubble.seedTags || ensureTags(bubble.note, bubble.title)), ...incomingSet]));
+          return { ...bubble, seedTags: nextSeeds };
+        }));
+
+        const mergedTags = pendingIntegrations.flatMap((item) => item.tags);
+        logEvent(`La grappe ${mergedTags.join(' ')} est absorbée par une bulle.`);
+      }
+
+      settledSeedsRef.current.forEach((floater) => {
+        floater.drift += 0.002;
+        floater.sprite.position.x += Math.sin(elapsed * 0.5 + floater.drift) * 0.004;
+        floater.sprite.position.y += Math.cos(elapsed * 0.6 + floater.drift * 1.2) * 0.004;
+        floater.sprite.position.z += Math.sin(elapsed * 0.55 + floater.drift * 0.8) * 0.004;
+        floater.sprite.position.add(floater.velocity);
+        floater.velocity.multiplyScalar(0.995);
+        const distanceFromCenter = floater.sprite.position.length();
+        if (distanceFromCenter > 0.75) {
+          floater.sprite.position.addScaledVector(floater.sprite.position.clone().normalize(), -0.02);
+        }
+        floater.sprite.lookAt(camera.position);
+      });
+
       controls.update();
       renderer.render(scene, camera);
       frameIdRef.current = requestAnimationFrame(animate);
@@ -561,7 +644,6 @@ export default function App() {
 
     return () => {
       renderer.domElement.removeEventListener('pointerdown', onPointerDown);
-      renderer.domElement.removeEventListener('pointermove', onPointerMove);
       renderer.domElement.removeEventListener('pointerup', onPointerUp);
       renderer.domElement.removeEventListener('pointerleave', onPointerOut);
       renderer.domElement.removeEventListener('pointercancel', onPointerOut);
@@ -569,13 +651,36 @@ export default function App() {
       resizeObserver.disconnect();
       window.removeEventListener('resize', updateSize);
       if (frameIdRef.current) cancelAnimationFrame(frameIdRef.current);
-      releaseControls();
       controls.dispose();
       geometry.dispose();
       starGeo.dispose();
       starMat.dispose();
       lineGeom.dispose();
       lineMaterial.dispose();
+      seedClustersRef.current.forEach((cluster) => {
+        cluster.group.children.forEach((child) => {
+          if (child.material?.map) child.material.map.dispose();
+          if (child.material) child.material.dispose();
+          if (child.geometry) child.geometry.dispose();
+        });
+      });
+      seedClustersRef.current = [];
+      settledSeedsRef.current.forEach(({ sprite }) => {
+        if (sprite.material?.map) sprite.material.map.dispose();
+        if (sprite.material) sprite.material.dispose();
+      });
+      settledSeedsRef.current = [];
+      if (seedGroupRef.current) {
+        scene.remove(seedGroupRef.current);
+        seedGroupRef.current = null;
+      }
+      bubbleTagGroupsRef.current.forEach((group) => {
+        group.children.forEach((child) => {
+          if (child.material?.map) child.material.map.dispose();
+          if (child.material) child.material.dispose();
+        });
+      });
+      bubbleTagGroupsRef.current = new Map();
       atoms.forEach((atom) => atom.material.dispose());
       renderer.dispose();
       if (sceneContainerRef.current?.contains(renderer.domElement)) {
@@ -584,7 +689,7 @@ export default function App() {
       cameraRef.current = null;
       controlsRef.current = null;
     };
-  }, [visibleBubbles]);
+  }, [bubbles]);
 
   useEffect(() => {
     if (!isInteriorOpen || !interiorContainerRef.current || !focusedBubble) return undefined;
@@ -593,14 +698,17 @@ export default function App() {
     scene.background = new THREE.Color(0x050a16);
     interiorSceneRef.current = scene;
 
-    const camera = new THREE.PerspectiveCamera(70, 1, 0.1, 100);
-    camera.position.set(0, 0, 3.2);
+    const camera = new THREE.PerspectiveCamera(70, 1, 0.1, 1000);
+    camera.position.set(0, 0, 0);
     interiorCameraRef.current = camera;
 
     const renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     interiorContainerRef.current.appendChild(renderer.domElement);
     interiorRendererRef.current = renderer;
+    interiorOrientationRef.current = { active: false, quaternion: new THREE.Quaternion(), cleanup: null };
+    interiorFallbackViewRef.current = { yaw: 0, pitch: 0, dragging: false, lastX: 0, lastY: 0 };
+    interiorAutoDriftRef.current = 0;
 
     const updateSize = () => {
       const rect = interiorContainerRef.current?.getBoundingClientRect();
@@ -619,30 +727,47 @@ export default function App() {
     soft.position.set(2, 2, 2);
     scene.add(soft);
 
-    const dome = new THREE.Mesh(
-      new THREE.SphereGeometry(6, 52, 52),
-      new THREE.MeshStandardMaterial({
-        color: new THREE.Color(0x0b1a33),
-        emissive: new THREE.Color(focusedBubble.color).multiplyScalar(0.15),
-        roughness: 0.8,
-        metalness: 0.05,
-        side: THREE.BackSide,
-      }),
-    );
+    const domeMaterial = new THREE.MeshStandardMaterial({
+      color: new THREE.Color(0x0b1a33),
+      emissive: new THREE.Color(focusedBubble.color).multiplyScalar(0.15),
+      roughness: 0.85,
+      metalness: 0.05,
+      side: THREE.BackSide,
+    });
+    let domeTexture = null;
+    if (focusedBubble.skyboxUrl) {
+      const loader = new THREE.TextureLoader();
+      loader.load(
+        focusedBubble.skyboxUrl,
+        (texture) => {
+          texture.colorSpace = THREE.SRGBColorSpace;
+          texture.wrapS = THREE.RepeatWrapping;
+          texture.wrapT = THREE.RepeatWrapping;
+          domeMaterial.map = texture;
+          domeMaterial.needsUpdate = true;
+          domeTexture = texture;
+        },
+        undefined,
+        () => {
+          domeMaterial.color = new THREE.Color(0x0b1a33);
+        },
+      );
+    }
+
+    const dome = new THREE.Mesh(new THREE.SphereGeometry(16, 64, 64), domeMaterial);
     scene.add(dome);
 
     const networkGroup = new THREE.Group();
     scene.add(networkGroup);
     interiorNetworkGroupRef.current = networkGroup;
     miniNetworksRef.current = [];
-    syncTimeoutsRef.current = [];
 
-    const initialTags = ensureTags(focusedBubble.note, focusedBubble.title);
+    const initialTags = focusedBubble.seedTags || ensureTags(focusedBubble.note, focusedBubble.title);
 
     if (initialTags.length > 0) {
       const seedNetwork = createMiniNetwork(initialTags);
       if (seedNetwork) {
-        logSync(`Texte source (${initialTags.join(' ')}) transmuté puis expédié.`);
+        logEvent(`Intérieur (${initialTags.join(' ')}) en orbite douce.`);
       }
     }
 
@@ -650,6 +775,76 @@ export default function App() {
     resizeObserver.observe(interiorContainerRef.current);
     window.addEventListener('resize', updateSize);
     updateSize();
+
+    const maybeEnableGyro = async () => {
+      if (!('DeviceOrientationEvent' in window)) return;
+      const { DeviceOrientationEvent } = window;
+      const permissionRequest = DeviceOrientationEvent.requestPermission;
+      if (typeof permissionRequest === 'function') {
+        try {
+          const permission = await permissionRequest();
+          if (permission !== 'granted') return;
+        } catch (error) {
+          return;
+        }
+      }
+
+      const setQuaternionFromDevice = (event) => {
+        const alpha = THREE.MathUtils.degToRad(event.alpha || 0);
+        const beta = THREE.MathUtils.degToRad(event.beta || 0);
+        const gamma = THREE.MathUtils.degToRad(event.gamma || 0);
+        const orient = THREE.MathUtils.degToRad(window.orientation || 0);
+        const euler = new THREE.Euler(beta, alpha, -gamma, 'YXZ');
+        const quaternion = new THREE.Quaternion().setFromEuler(euler);
+        const screenAdjust = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), -orient);
+        interiorOrientationRef.current.quaternion.copy(quaternion.multiply(screenAdjust));
+        interiorOrientationRef.current.active = true;
+      };
+
+      window.addEventListener('deviceorientation', setQuaternionFromDevice, true);
+      interiorOrientationRef.current.cleanup = () => {
+        window.removeEventListener('deviceorientation', setQuaternionFromDevice, true);
+        interiorOrientationRef.current.active = false;
+      };
+      interiorAutoDriftRef.current = 0;
+    };
+
+    maybeEnableGyro();
+
+    const handlePointerDown = (event) => {
+      interiorFallbackViewRef.current = {
+        ...interiorFallbackViewRef.current,
+        dragging: true,
+        lastX: event.clientX,
+        lastY: event.clientY,
+      };
+    };
+
+    const handlePointerUp = () => {
+      interiorFallbackViewRef.current = {
+        ...interiorFallbackViewRef.current,
+        dragging: false,
+      };
+    };
+
+    const handlePointerMove = (event) => {
+      const view = interiorFallbackViewRef.current;
+      if (!view.dragging || interiorOrientationRef.current?.active) return;
+      const deltaX = event.clientX - view.lastX;
+      const deltaY = event.clientY - view.lastY;
+      interiorFallbackViewRef.current = {
+        ...view,
+        yaw: view.yaw - deltaX * 0.002,
+        pitch: Math.max(-Math.PI / 2 + 0.05, Math.min(Math.PI / 2 - 0.05, view.pitch - deltaY * 0.002)),
+        lastX: event.clientX,
+        lastY: event.clientY,
+      };
+    };
+
+    renderer.domElement.addEventListener('pointerdown', handlePointerDown);
+    renderer.domElement.addEventListener('pointerup', handlePointerUp);
+    renderer.domElement.addEventListener('pointerleave', handlePointerUp);
+    renderer.domElement.addEventListener('pointermove', handlePointerMove);
 
     const clock = new THREE.Clock();
     const animate = () => {
@@ -665,6 +860,13 @@ export default function App() {
           if (child.lookAt) child.lookAt(camera.position);
         });
       });
+      if (interiorOrientationRef.current?.active) {
+        camera.quaternion.copy(interiorOrientationRef.current.quaternion);
+      } else {
+        interiorAutoDriftRef.current += 0.0006;
+        const { yaw, pitch } = interiorFallbackViewRef.current;
+        camera.rotation.set(pitch, yaw + interiorAutoDriftRef.current, 0, 'YXZ');
+      }
       dome.rotation.y += 0.0009;
       renderer.render(scene, camera);
       interiorFrameIdRef.current = requestAnimationFrame(animate);
@@ -672,9 +874,15 @@ export default function App() {
     animate();
 
     return () => {
+      renderer.domElement.removeEventListener('pointerdown', handlePointerDown);
+      renderer.domElement.removeEventListener('pointerup', handlePointerUp);
+      renderer.domElement.removeEventListener('pointerleave', handlePointerUp);
+      renderer.domElement.removeEventListener('pointermove', handlePointerMove);
       resizeObserver.disconnect();
       window.removeEventListener('resize', updateSize);
       if (interiorFrameIdRef.current) cancelAnimationFrame(interiorFrameIdRef.current);
+      if (interiorOrientationRef.current?.cleanup) interiorOrientationRef.current.cleanup();
+      interiorOrientationRef.current = { active: false, quaternion: new THREE.Quaternion(), cleanup: null };
       miniNetworksRef.current.forEach((network) => {
         network.children.forEach((child) => {
           if (child.material?.map) child.material.map.dispose();
@@ -683,8 +891,7 @@ export default function App() {
         });
       });
       miniNetworksRef.current = [];
-      syncTimeoutsRef.current.forEach((id) => clearTimeout(id));
-      syncTimeoutsRef.current = [];
+      if (domeTexture) domeTexture.dispose();
       dome.geometry.dispose();
       dome.material.dispose();
       renderer.dispose();
@@ -698,37 +905,9 @@ export default function App() {
     };
   }, [focusedBubble, isInteriorOpen]);
 
-  const handleEnter = () => {
-    if (!focusedBubble) return;
-    setIsInteriorOpen(true);
-    setShowEntryPrompt(false);
-    setSyncEvents([]);
-  };
-
   const handleExitInterior = () => {
     setIsInteriorOpen(false);
-    setNewNote('');
     resetView();
-  };
-
-  const discardNetwork = (group) => {
-    if (!group) return;
-    miniNetworksRef.current = miniNetworksRef.current.filter((net) => net !== group);
-    group.children.forEach((child) => {
-      if (child.material?.map) child.material.map.dispose();
-      if (child.material) child.material.dispose();
-      if (child.geometry) child.geometry.dispose();
-    });
-    if (interiorNetworkGroupRef.current) {
-      interiorNetworkGroupRef.current.remove(group);
-    }
-  };
-
-  const logSync = (message) => {
-    setSyncEvents((prev) => {
-      const next = [{ id: uniqueId(), message }, ...prev];
-      return next.slice(0, 4);
-    });
   };
 
   const createMiniNetwork = (tags) => {
@@ -749,7 +928,7 @@ export default function App() {
     group.add(core);
 
     const lines = [];
-    const radius = 1 + Math.random() * 0.4;
+    const radius = 1.4 + Math.random() * 0.5;
     tags.forEach((tag, index) => {
       const phi = Math.acos(1 - (2 * (index + 0.5)) / (tags.length + 1));
       const theta = Math.PI * (1 + Math.sqrt(5)) * index;
@@ -783,225 +962,94 @@ export default function App() {
     return group;
   };
 
-  const handleAddNote = (event) => {
-    event.preventDefault();
-    if (!focusedBubble) return;
-    const trimmed = newNote.trim();
-    if (!trimmed) return;
-
-    const tags = tokenizeText(trimmed);
-    if (tags.length === 0) return;
-
-    const group = createMiniNetwork(tags);
-    setNewNote('');
-
-    if (group) {
-      const timeout = setTimeout(() => {
-        logSync(`Réseau (${tags.join(' ')}) envoyé et recyclé.`);
-        discardNetwork(group);
-      }, 4200);
-      syncTimeoutsRef.current.push(timeout);
-    }
-  };
-
   return (
-    <div className="layout">
-      <header className="hero">
-        <div>
+    <div className="shell">
+      <aside className="sidebar">
+        <div className="sidebar-block">
           <p className="eyebrow">EchoBulle</p>
-          <h1>Réseau de bulles transmedia à explorer lentement</h1>
+          <h1>Réseau 3D unique et intérieur</h1>
           <p className="lede">
-            Ouvrez la scène, observez les bulles et leurs liens lumineux. Entrez dans l\'une d\'elles pour
-            semer un texte : il sera transmuté en tags et émojis flottants, envoyé au serveur, puis recyclé.
-            Vous pouvez aussi déposer une nouvelle bulle en choisissant son titre, sa matière transmedia et ses
-            attaches dans le réseau vivant.
+            Cliquez une bulle, entrez directement dedans et observez son monde de particules. Le réseau reste
+            présent en toile de fond tandis que les tags et émojis gravitent pour rejoindre les bulles.
           </p>
-        </div>
-        <div className="hero-actions">
-          <button type="button" className="ghost" onClick={handleAddBubble}>
-            Ajouter une bulle
-          </button>
-          <button type="button" className="ghost" onClick={resetView}>
-            Revenir au réseau
-          </button>
-        </div>
-      </header>
-
-      <div className="scene" aria-label="Réseau de bulles 3D">
-        <div ref={sceneContainerRef} className="experience" />
-
-        <div className="floating-panel" role="group" aria-label="Filtrer l'affichage des bulles">
-          <div className="filter-copy">
-            <p className="eyebrow">Filtre d'affichage</p>
-            <p className="muted">Choisissez quelles bulles flottent : toutes ou seulement les nouvelles.</p>
-          </div>
-          <div className="segmented" aria-label="Modes de filtre">
-            <button
-              type="button"
-              className={filterMode === 'all' ? 'active' : ''}
-              onClick={() => setFilterMode('all')}
-            >
-              Toutes les bulles
-            </button>
-            <button
-              type="button"
-              className={filterMode === 'recent' ? 'active' : ''}
-              onClick={() => setFilterMode('recent')}
-            >
-              Récemment créées
+          <div className="control-row">
+            <button type="button" className="primary" onClick={resetView}>Revenir au réseau</button>
+            <button type="button" className="ghost" onClick={handleExitInterior} disabled={!focusedBubble}>
+              Quitter la bulle
             </button>
           </div>
-          <div className="panel-footer">
-            <span className="chip subtle">Visibles : {visibleBubbles.length}</span>
-            <span className="hint">Maintenez une bulle pour entrer dans son intérieur.</span>
-          </div>
         </div>
 
-      </div>
+        <form className="sidebar-block seed-form" onSubmit={handleSeedNetwork}>
+          <p className="eyebrow">Ensemencer le réseau</p>
+          <p className="muted">Texte + émojis sont transformés en tags flottants attirés par les bulles.</p>
+          <input
+            type="text"
+            value={seedInput}
+            onChange={(e) => setSeedInput(e.target.value)}
+            placeholder="Déposer une pluie de mots ou d'icônes"
+          />
+          <button type="submit" className="primary">Lâcher les tags</button>
+        </form>
 
-      {isInteriorOpen && focusedBubble && (
-        <div className="modal-backdrop" role="dialog" aria-modal="true">
-          <div className="modal interior-modal">
-            <div className="modal-header">
-              <div>
-                <p className="eyebrow">Intérieur</p>
-                <h2>{focusedBubble.title}</h2>
-                <p className="lede">
-                  Semez un texte. Il devient un mini-réseau de tags/émojis flottant, envoyé au serveur lors
-                  de chaque synchro. Le texte brut est détruit après transmutation.
-                </p>
-                {focusedBubble.note && <p className="muted">{focusedBubble.note}</p>}
-                <div className="tag-cloud" aria-label="Tags initiaux de la bulle">
-                  {ensureTags(focusedBubble.note, focusedBubble.title).map((tag) => (
-                    <span key={tag} className="chip subtle">{tag}</span>
-                  ))}
-                </div>
-                <div className="bubble-meta">
-                  <span className="chip">Skybox : {focusedBubble.skyboxUrl || 'à venir'}</span>
-                  <span className="chip">FX : {focusedBubble.fx || 'silence'}</span>
-                </div>
+        <div className="sidebar-block focus-panel">
+          <p className="eyebrow">Bulle en cours</p>
+          {focusedBubble ? (
+            <>
+              <h3>{focusedBubble.title}</h3>
+              <p className="muted">{focusedBubble.note || 'Silence intérieur à explorer.'}</p>
+              <div className="tag-cloud" aria-label="Tags de la bulle">
+                {(focusedBubble.seedTags || ensureTags(focusedBubble.note, focusedBubble.title)).map((tag) => (
+                  <span key={tag} className="chip subtle">{tag}</span>
+                ))}
               </div>
-              <button type="button" className="ghost" onClick={handleExitInterior}>
-                Quitter la bulle
-              </button>
-            </div>
-
-            <div className="interior-body">
-              <div className="viewport-panel">
-                <div className="panel-header">
-                  <p className="eyebrow">Mini réseau 3D</p>
-                  <p className="muted">Tags + émojis transmutés dans la bulle.</p>
-                </div>
-                <div className="interior-viewport" ref={interiorContainerRef} aria-label="Mini réseau three.js" />
+              <div className="bubble-meta">
+                <span className="chip">Skybox : {focusedBubble.skyboxUrl || 'à venir'}</span>
+                <span className="chip">FX : {focusedBubble.fx || 'silence'}</span>
               </div>
-              <form className="note-form" onSubmit={handleAddNote}>
-                <label htmlFor="note">Texte à semer</label>
-                <input
-                  id="note"
-                  type="text"
-                  value={newNote}
-                  onChange={(e) => setNewNote(e.target.value)}
-                  placeholder="Un mot, une phrase, une pluie d'émojis..."
-                />
-                <button type="submit" className="primary">Planter</button>
-              </form>
-              <div className="sync-feed">
-                {syncEvents.length === 0 ? (
-                  <p className="muted">Chaque transmutation sera envoyée puis effacée ici.</p>
-                ) : (
-                  <ul>
-                    {syncEvents.map((event) => (
-                      <li key={event.id}>{event.message}</li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-            </div>
-          </div>
+            </>
+          ) : (
+            <p className="muted">Sélectionnez une bulle du réseau pour ressentir son intériorité.</p>
+          )}
         </div>
-      )}
 
-      {showAddModal && (
-        <div className="modal-backdrop" role="dialog" aria-modal="true">
-          <div className="modal">
-            <div className="modal-header">
-              <div>
-                <p className="eyebrow">Nouvelle bulle</p>
-                <h3>Composer et relier</h3>
-                <p className="muted">Titre, matière textuelle, skybox et fx optionnel avant de choisir les liens.</p>
-              </div>
-              <button type="button" className="ghost" onClick={() => setShowAddModal(false)}>
-                Fermer
-              </button>
-            </div>
-
-            <form className="modal-form" onSubmit={handleCreateBubble}>
-              <label className="stacked">
-                <span>Titre de la bulle</span>
-                <input
-                  type="text"
-                  value={newBubbleData.title}
-                  onChange={(e) => setNewBubbleData((prev) => ({ ...prev, title: e.target.value }))}
-                  placeholder="Souffle nocturne..."
-                />
-              </label>
-
-              <label className="stacked">
-                <span>Texte contenu</span>
-                <textarea
-                  value={newBubbleData.note}
-                  onChange={(e) => setNewBubbleData((prev) => ({ ...prev, note: e.target.value }))}
-                  placeholder="Un fragment poétique ou une intuition à suspendre."
-                />
-              </label>
-
-              <div className="two-cols">
-                <label className="stacked">
-                  <span>Skybox (URL)</span>
-                  <input
-                    type="url"
-                    value={newBubbleData.skyboxUrl}
-                    onChange={(e) => setNewBubbleData((prev) => ({ ...prev, skyboxUrl: e.target.value }))}
-                    placeholder="https://..."
-                  />
-                </label>
-                <label className="stacked">
-                  <span>FX particules</span>
-                  <input
-                    type="text"
-                    value={newBubbleData.fx}
-                    onChange={(e) => setNewBubbleData((prev) => ({ ...prev, fx: e.target.value }))}
-                    placeholder="lueurs lentes, pluie fine..."
-                  />
-                </label>
-              </div>
-
-              <div className="connection-picker">
-                <div className="connection-header">
-                  <span className="eyebrow">Liens dans le réseau</span>
-                  <p className="muted">Sélectionnez les bulles voisines (ou aucune pour laisser la bulle flotter).</p>
-                </div>
-                <div className="connection-list">
-                  {bubbles.map((bubble) => (
-                    <label key={bubble.id} className="connection-option">
-                      <input
-                        type="checkbox"
-                        checked={newBubbleData.connections.includes(bubble.id)}
-                        onChange={() => toggleConnection(bubble.id)}
-                      />
-                      <span>{bubble.title}</span>
-                    </label>
-                  ))}
-                </div>
-              </div>
-
-              <div className="actions align-right">
-                <button type="submit" className="primary">Créer la bulle</button>
-              </div>
-            </form>
-          </div>
+        <div className="sidebar-block sync-feed">
+          <p className="eyebrow">Flux</p>
+          {syncEvents.length === 0 ? (
+            <p className="muted">Les graines déposées et intégrations apparaissent ici.</p>
+          ) : (
+            <ul>
+              {syncEvents.map((event) => (
+                <li key={event.id}>{event.message}</li>
+              ))}
+            </ul>
+          )}
         </div>
-      )}
+      </aside>
+
+      <main className="stage">
+        <div className="scene" aria-label="Réseau de bulles 3D">
+          <div ref={sceneContainerRef} className="experience" />
+          {isInteriorOpen && focusedBubble && (
+            <div className="interior-window" role="region" aria-label="Intérieur de la bulle">
+              <div className="interior-window-header">
+                <div>
+                  <p className="eyebrow">Intérieur</p>
+                  <h3>{focusedBubble.title}</h3>
+                </div>
+                <span className="chip subtle">Caméra 360° · Gyro</span>
+                <button type="button" className="ghost" onClick={handleExitInterior}>Sortir</button>
+              </div>
+              <div className="tag-cloud" aria-label="Tags intégrés">
+                {(focusedBubble.seedTags || ensureTags(focusedBubble.note, focusedBubble.title)).map((tag) => (
+                  <span key={tag} className="chip subtle">{tag}</span>
+                ))}
+              </div>
+              <div className="interior-viewport" ref={interiorContainerRef} aria-label="Micro réseau" />
+            </div>
+          )}
+        </div>
+      </main>
     </div>
   );
 }
