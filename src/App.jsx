@@ -5,6 +5,48 @@ import gsap from 'gsap';
 
 const palette = [0x7cf7ff, 0xff7bd9, 0xffd170, 0x7bffbf, 0xb7a7ff];
 
+const poeticTitles = [
+  'Marée d\'aurore',
+  'Souffle des lucioles',
+  'Nébuleuse des murmures',
+  'Pluie d\'étoiles lentes',
+  'Jardin des ondes',
+  'Courbe des marées',
+  'Mémoire phosphène',
+  'Étang céleste',
+  'Spirale du velours',
+  'Clarté des paillettes',
+  'Brume magnétique',
+  'Arc des songes',
+  'Route des comètes',
+  'Halo des lichens',
+  'Chant des anémones',
+  'Cercles du vent doux',
+  'Suspension d\'argent',
+  'Delta des possibles',
+];
+
+const poeticTexts = [
+  'Une onde qui se replie et revient.',
+  'Des éclats calmes qui se répondent.',
+  'Les mots chuchotés deviennent vapeur.',
+  'Chaque goutte d\'étoile s\'étire.',
+  'Un motif souple comme un fil d\'eau.',
+  'La marée trace des arcs lents.',
+  'Des souvenirs s\'allument en silence.',
+  'Le miroir du ciel respire.',
+  'Un pas sur un velours astral.',
+  'Une poussière scintille puis retombe.',
+  'La brume tient les éclats ensemble.',
+  'Un arc invisible relie les pensées.',
+  'Les comètes dessinent des chemins.',
+  'Un halo mousseux d\'idées.',
+  'Les anémones chantent bas.',
+  'Des cercles d\'air effleurent la peau.',
+  'Un fil d\'argent suspendu.',
+  'L\'embouchure où tout peut naître.',
+];
+
 function createTextSprite(text, color = '#e8f7ff') {
   const canvas = document.createElement('canvas');
   const context = canvas.getContext('2d');
@@ -45,9 +87,9 @@ function createTextSprite(text, color = '#e8f7ff') {
 }
 
 function generateBubbles() {
-  const count = 18;
+  const count = poeticTitles.length;
   const goldenAngle = Math.PI * (3 - Math.sqrt(5));
-  return Array.from({ length: count }, (_, index) => {
+  const base = Array.from({ length: count }, (_, index) => {
     const theta = goldenAngle * index;
     const y = 1 - (index / (count - 1)) * 2;
     const radius = Math.sqrt(1 - y * y);
@@ -60,11 +102,30 @@ function generateBubbles() {
 
     return {
       id: `bulle-${index + 1}`,
-      title: `Bulle ${index + 1}`,
+      title: poeticTitles[index],
+      note: poeticTexts[index],
+      skyboxUrl: '',
+      fx: '',
+      connections: [],
       color: palette[index % palette.length],
       position,
     };
   });
+
+  base.forEach((source, index) => {
+    const neighbors = base
+      .map((candidate, idx) => (idx !== index ? { candidate, distance: source.position.distanceTo(candidate.position) } : null))
+      .filter(Boolean)
+      .sort((a, b) => a.distance - b.distance)
+      .slice(0, 3);
+
+    neighbors.forEach(({ candidate }) => {
+      if (!source.connections.includes(candidate.id)) source.connections.push(candidate.id);
+      if (!candidate.connections.includes(source.id)) candidate.connections.push(source.id);
+    });
+  });
+
+  return base;
 }
 
 function tokenizeText(input) {
@@ -111,7 +172,15 @@ export default function App() {
   const [focusedBubble, setFocusedBubble] = useState(null);
   const [showEntryPrompt, setShowEntryPrompt] = useState(false);
   const [isInteriorOpen, setIsInteriorOpen] = useState(false);
+  const [showAddModal, setShowAddModal] = useState(false);
   const [newNote, setNewNote] = useState('');
+  const [newBubbleData, setNewBubbleData] = useState({
+    title: '',
+    note: '',
+    skyboxUrl: '',
+    fx: '',
+    connections: [],
+  });
 
   const [syncEvents, setSyncEvents] = useState([]);
 
@@ -129,26 +198,69 @@ export default function App() {
   };
 
   const handleAddBubble = () => {
-    const angle = Math.random() * Math.PI * 2;
-    const radius = 9 + Math.random() * 6;
-    const height = (Math.random() - 0.5) * 6;
-    const position = new THREE.Vector3(
-      Math.cos(angle) * radius,
-      height,
-      Math.sin(angle) * radius,
-    );
+    setNewBubbleData({ title: '', note: '', skyboxUrl: '', fx: '', connections: [] });
+    setShowAddModal(true);
+  };
+
+  const handleCreateBubble = (event) => {
+    event.preventDefault();
+    const selectedConnections = newBubbleData.connections || [];
+    const title = newBubbleData.title.trim() || 'Bulle inédite';
+    const note = newBubbleData.note.trim();
+    const skyboxUrl = newBubbleData.skyboxUrl.trim();
+    const fx = newBubbleData.fx.trim();
 
     setBubbles((prev) => {
       const nextIndex = prev.length + 1;
-      return [
-        ...prev,
-        {
-          id: `bulle-${nextIndex}`,
-          title: `Bulle ${nextIndex}`,
-          color: palette[nextIndex % palette.length],
-          position,
-        },
-      ];
+      const id = `bulle-${nextIndex}`;
+      const color = palette[nextIndex % palette.length];
+
+      const anchors = prev.filter((bubble) => selectedConnections.includes(bubble.id));
+      const center = anchors.reduce((acc, bubble) => acc.add(bubble.position), new THREE.Vector3());
+      const position = anchors.length
+        ? center.divideScalar(anchors.length).add(new THREE.Vector3(
+          (Math.random() - 0.5) * 2.4,
+          (Math.random() - 0.5) * 1.6,
+          (Math.random() - 0.5) * 2.4,
+        ))
+        : (() => {
+          const angle = Math.random() * Math.PI * 2;
+          const radius = 9 + Math.random() * 6;
+          const height = (Math.random() - 0.5) * 6;
+          return new THREE.Vector3(
+            Math.cos(angle) * radius,
+            height,
+            Math.sin(angle) * radius,
+          );
+        })();
+
+      const updatedBubbles = prev.map((bubble) => {
+        if (!selectedConnections.includes(bubble.id)) return bubble;
+        return { ...bubble, connections: Array.from(new Set([...(bubble.connections || []), id])) };
+      });
+
+      const newBubble = {
+        id,
+        title,
+        note,
+        skyboxUrl,
+        fx,
+        connections: [...selectedConnections],
+        color,
+        position,
+      };
+
+      return [...updatedBubbles, newBubble];
+    });
+
+    setShowAddModal(false);
+  };
+
+  const toggleConnection = (id) => {
+    setNewBubbleData((prev) => {
+      const exists = prev.connections.includes(id);
+      const connections = exists ? prev.connections.filter((conn) => conn !== id) : [...prev.connections, id];
+      return { ...prev, connections };
     });
   };
 
@@ -260,22 +372,21 @@ export default function App() {
 
     const lineMaterial = new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.18 });
     const linkPositions = [];
-    const linkThreshold = 11;
+    const addedPairs = new Set();
     bubbles.forEach((source) => {
-      const neighbors = [...bubbles]
-        .filter((candidate) => candidate.id !== source.id)
-        .map((candidate) => ({ candidate, distance: source.position.distanceTo(candidate.position) }))
-        .filter(({ distance }) => distance <= linkThreshold)
-        .sort((a, b) => a.distance - b.distance)
-        .slice(0, 3);
-      neighbors.forEach(({ candidate }) => {
+      (source.connections || []).forEach((targetId) => {
+        const target = bubbles.find((candidate) => candidate.id === targetId);
+        if (!target) return;
+        const key = [source.id, target.id].sort().join('->');
+        if (addedPairs.has(key)) return;
+        addedPairs.add(key);
         linkPositions.push(
           source.position.x,
           source.position.y,
           source.position.z,
-          candidate.position.x,
-          candidate.position.y,
-          candidate.position.z,
+          target.position.x,
+          target.position.y,
+          target.position.z,
         );
       });
     });
@@ -585,7 +696,8 @@ export default function App() {
           <p className="lede">
             Ouvrez la scène, observez les bulles et leurs liens lumineux. Entrez dans l\'une d\'elles pour
             semer un texte : il sera transmuté en tags et émojis flottants, envoyé au serveur, puis recyclé.
-            Vous pouvez aussi déposer une nouvelle bulle près du réseau vivant.
+            Vous pouvez aussi déposer une nouvelle bulle en choisissant son titre, sa matière transmedia et ses
+            attaches dans le réseau vivant.
           </p>
         </div>
         <div className="hero-actions">
@@ -606,6 +718,7 @@ export default function App() {
             <p className="eyebrow">Invitation</p>
             <h2>Entrer dans {focusedBubble.title} ?</h2>
             <p>La caméra s\'est rapprochée. Entrez pour découvrir et planter des textes.</p>
+            {focusedBubble.note && <p className="muted">{focusedBubble.note}</p>}
             <div className="actions">
               <button type="button" className="primary" onClick={handleEnter}>
                 Entrer dans la bulle
@@ -628,6 +741,11 @@ export default function App() {
                 Semez un texte. Il devient un mini-réseau de tags/émojis flottant, envoyé au serveur lors
                 de chaque synchro. Le texte brut est détruit après transmutation.
               </p>
+              {focusedBubble.note && <p className="muted">{focusedBubble.note}</p>}
+              <div className="bubble-meta">
+                <span className="chip">Skybox : {focusedBubble.skyboxUrl || 'à venir'}</span>
+                <span className="chip">FX : {focusedBubble.fx || 'silence'}</span>
+              </div>
             </div>
             <button type="button" className="ghost" onClick={handleExitInterior}>
               Quitter la bulle
@@ -658,6 +776,88 @@ export default function App() {
                 </ul>
               )}
             </div>
+          </div>
+        </div>
+      )}
+
+      {showAddModal && (
+        <div className="modal-backdrop" role="dialog" aria-modal="true">
+          <div className="modal">
+            <div className="modal-header">
+              <div>
+                <p className="eyebrow">Nouvelle bulle</p>
+                <h3>Composer et relier</h3>
+                <p className="muted">Titre, matière textuelle, skybox et fx optionnel avant de choisir les liens.</p>
+              </div>
+              <button type="button" className="ghost" onClick={() => setShowAddModal(false)}>
+                Fermer
+              </button>
+            </div>
+
+            <form className="modal-form" onSubmit={handleCreateBubble}>
+              <label className="stacked">
+                <span>Titre de la bulle</span>
+                <input
+                  type="text"
+                  value={newBubbleData.title}
+                  onChange={(e) => setNewBubbleData((prev) => ({ ...prev, title: e.target.value }))}
+                  placeholder="Souffle nocturne..."
+                />
+              </label>
+
+              <label className="stacked">
+                <span>Texte contenu</span>
+                <textarea
+                  value={newBubbleData.note}
+                  onChange={(e) => setNewBubbleData((prev) => ({ ...prev, note: e.target.value }))}
+                  placeholder="Un fragment poétique ou une intuition à suspendre."
+                />
+              </label>
+
+              <div className="two-cols">
+                <label className="stacked">
+                  <span>Skybox (URL)</span>
+                  <input
+                    type="url"
+                    value={newBubbleData.skyboxUrl}
+                    onChange={(e) => setNewBubbleData((prev) => ({ ...prev, skyboxUrl: e.target.value }))}
+                    placeholder="https://..."
+                  />
+                </label>
+                <label className="stacked">
+                  <span>FX particules</span>
+                  <input
+                    type="text"
+                    value={newBubbleData.fx}
+                    onChange={(e) => setNewBubbleData((prev) => ({ ...prev, fx: e.target.value }))}
+                    placeholder="lueurs lentes, pluie fine..."
+                  />
+                </label>
+              </div>
+
+              <div className="connection-picker">
+                <div className="connection-header">
+                  <span className="eyebrow">Liens dans le réseau</span>
+                  <p className="muted">Sélectionnez les bulles voisines (ou aucune pour laisser la bulle flotter).</p>
+                </div>
+                <div className="connection-list">
+                  {bubbles.map((bubble) => (
+                    <label key={bubble.id} className="connection-option">
+                      <input
+                        type="checkbox"
+                        checked={newBubbleData.connections.includes(bubble.id)}
+                        onChange={() => toggleConnection(bubble.id)}
+                      />
+                      <span>{bubble.title}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              <div className="actions align-right">
+                <button type="submit" className="primary">Créer la bulle</button>
+              </div>
+            </form>
           </div>
         </div>
       )}
