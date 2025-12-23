@@ -170,6 +170,8 @@ export default function App() {
   const frameIdRef = useRef(null);
   const seedGroupRef = useRef(null);
   const seedParticlesRef = useRef([]);
+  const settledSeedsRef = useRef([]);
+  const bubbleTagGroupsRef = useRef(new Map());
   const restoreControlsRef = useRef(null);
 
   const interiorRendererRef = useRef(null);
@@ -213,8 +215,9 @@ export default function App() {
 
       seedParticlesRef.current.push({
         sprite,
-        velocity: new THREE.Vector3((Math.random() - 0.5) * 0.015, (Math.random() - 0.5) * 0.012, (Math.random() - 0.5) * 0.015),
+        velocity: new THREE.Vector3((Math.random() - 0.5) * 0.018, (Math.random() - 0.5) * 0.014, (Math.random() - 0.5) * 0.018),
         wander: Math.random() * Math.PI * 2 + index,
+        bounces: 0,
       });
     });
     logEvent(`Ensemencement (${uniqueTags.join(' ')}) libéré dans le réseau.`);
@@ -313,6 +316,7 @@ export default function App() {
 
     const geometry = new THREE.SphereGeometry(1.1, 32, 32);
     const atoms = [];
+    bubbleTagGroupsRef.current = new Map();
 
     bubbles.forEach((bubble) => {
       const material = new THREE.MeshPhysicalMaterial({
@@ -331,6 +335,11 @@ export default function App() {
       mesh.userData.meta = bubble;
       const light = new THREE.PointLight(bubble.color, 0.8, 7);
       mesh.add(light);
+      const tagNest = new THREE.Group();
+      tagNest.name = `tags-${bubble.id}`;
+      tagNest.userData.floaters = [];
+      mesh.add(tagNest);
+      bubbleTagGroupsRef.current.set(bubble.id, tagNest);
       scene.add(mesh);
       atoms.push(mesh);
     });
@@ -468,7 +477,15 @@ export default function App() {
           seed.velocity.addScaledVector(direction, pull);
 
           if (distance < 1.1) {
-            pendingIntegrations.push({ bubbleId: nearest.userData.meta.id, tag: seed.sprite.userData.tag, sprite: seed.sprite });
+            if (seed.bounces < 3) {
+              const normal = new THREE.Vector3().subVectors(seed.sprite.position, nearest.position).normalize();
+              const reflected = seed.velocity.clone().sub(normal.clone().multiplyScalar(2 * seed.velocity.dot(normal)));
+              seed.velocity.copy(reflected.multiplyScalar(0.85));
+              seed.velocity.addScaledVector(normal, 0.02);
+              seed.bounces += 1;
+            } else {
+              pendingIntegrations.push({ bubbleId: nearest.userData.meta.id, tag: seed.sprite.userData.tag, sprite: seed.sprite });
+            }
           }
         }
 
@@ -478,11 +495,26 @@ export default function App() {
       });
 
       if (pendingIntegrations.length > 0 && seedGroupRef.current) {
-        pendingIntegrations.forEach(({ sprite }) => {
+        pendingIntegrations.forEach(({ sprite, bubbleId }) => {
           seedParticlesRef.current = seedParticlesRef.current.filter((entry) => entry.sprite !== sprite);
           seedGroupRef.current.remove(sprite);
-          if (sprite.material?.map) sprite.material.map.dispose();
-          if (sprite.material) sprite.material.dispose();
+
+          const targetNest = bubbleTagGroupsRef.current.get(bubbleId);
+          if (targetNest) {
+            sprite.position.set((Math.random() - 0.5) * 0.8, (Math.random() - 0.5) * 0.8, (Math.random() - 0.5) * 0.8);
+            sprite.scale.multiplyScalar(0.7);
+            sprite.material.opacity = 0.95;
+            targetNest.add(sprite);
+            settledSeedsRef.current.push({
+              bubbleId,
+              sprite,
+              velocity: new THREE.Vector3((Math.random() - 0.5) * 0.003, (Math.random() - 0.5) * 0.003, (Math.random() - 0.5) * 0.003),
+              drift: Math.random() * Math.PI * 2,
+            });
+          } else {
+            if (sprite.material?.map) sprite.material.map.dispose();
+            if (sprite.material) sprite.material.dispose();
+          }
         });
 
         const updatesByBubble = pendingIntegrations.reduce((acc, item) => {
@@ -501,6 +533,20 @@ export default function App() {
         const mergedTags = pendingIntegrations.map((item) => item.tag);
         logEvent(`Les tags ${mergedTags.join(' ')} se déposent dans une bulle.`);
       }
+
+      settledSeedsRef.current.forEach((floater) => {
+        floater.drift += 0.002;
+        floater.sprite.position.x += Math.sin(elapsed * 0.5 + floater.drift) * 0.004;
+        floater.sprite.position.y += Math.cos(elapsed * 0.6 + floater.drift * 1.2) * 0.004;
+        floater.sprite.position.z += Math.sin(elapsed * 0.55 + floater.drift * 0.8) * 0.004;
+        floater.sprite.position.add(floater.velocity);
+        floater.velocity.multiplyScalar(0.995);
+        const distanceFromCenter = floater.sprite.position.length();
+        if (distanceFromCenter > 0.75) {
+          floater.sprite.position.addScaledVector(floater.sprite.position.clone().normalize(), -0.02);
+        }
+        floater.sprite.lookAt(camera.position);
+      });
 
       controls.update();
       renderer.render(scene, camera);
@@ -529,10 +575,22 @@ export default function App() {
         if (sprite.material) sprite.material.dispose();
       });
       seedParticlesRef.current = [];
+      settledSeedsRef.current.forEach(({ sprite }) => {
+        if (sprite.material?.map) sprite.material.map.dispose();
+        if (sprite.material) sprite.material.dispose();
+      });
+      settledSeedsRef.current = [];
       if (seedGroupRef.current) {
         scene.remove(seedGroupRef.current);
         seedGroupRef.current = null;
       }
+      bubbleTagGroupsRef.current.forEach((group) => {
+        group.children.forEach((child) => {
+          if (child.material?.map) child.material.map.dispose();
+          if (child.material) child.material.dispose();
+        });
+      });
+      bubbleTagGroupsRef.current = new Map();
       atoms.forEach((atom) => atom.material.dispose());
       renderer.dispose();
       if (sceneContainerRef.current?.contains(renderer.domElement)) {
