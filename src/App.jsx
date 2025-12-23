@@ -28,6 +28,7 @@ export default function App() {
   const [carouselIndex, setCarouselIndex] = useState(0);
   const [sceneHeight, setSceneHeight] = useState(0);
   const [sceneSize, setSceneSize] = useState({ width: 0, height: 0 });
+  const [interiorError, setInteriorError] = useState('');
   const [enterAnchor, setEnterAnchor] = useState({
     x: 0,
     y: 0,
@@ -61,6 +62,7 @@ export default function App() {
   const interiorRendererRef = useRef(null);
   const interiorCameraRef = useRef(null);
   const interiorControlsRef = useRef(null);
+  const interiorFallbackRef = useRef(null);
 
   const palette = [0x00d4ff, 0xff4fd4, 0x7cf7ff, 0xffd170, 0x7bffbf];
   const skyboxSets = [
@@ -599,6 +601,18 @@ export default function App() {
     const glow = new THREE.AmbientLight(0xffffff, 0.6);
     scene.add(glow);
 
+    const domeGeometry = new THREE.SphereGeometry(24, 64, 64);
+    const domeMaterial = new THREE.MeshBasicMaterial({
+      color: new THREE.Color('#0c1a2c'),
+      side: THREE.BackSide,
+      transparent: true,
+      opacity: 0.65,
+      depthWrite: false,
+    });
+    const dome = new THREE.Mesh(domeGeometry, domeMaterial);
+    scene.add(dome);
+    interiorFallbackRef.current = dome;
+
     interiorSceneRef.current = scene;
     interiorCameraRef.current = camera;
     interiorRendererRef.current = renderer;
@@ -628,21 +642,45 @@ export default function App() {
       if (frameId) cancelAnimationFrame(frameId);
       controls.dispose();
       renderer.dispose();
+      domeGeometry.dispose();
+      domeMaterial.dispose();
+      interiorFallbackRef.current = null;
     };
   }, [isModalOpen]);
 
   useEffect(() => {
     if (!isModalOpen || !selectedBubble || !interiorSceneRef.current) return undefined;
 
+    setInteriorError('');
     const loader = new THREE.CubeTextureLoader();
     loader.setCrossOrigin('anonymous');
 
-    const texture = loader.load(selectedBubble.skybox, (cube) => {
-      cube.colorSpace = THREE.SRGBColorSpace;
-      if (interiorSceneRef.current) {
-        interiorSceneRef.current.background = cube;
-      }
-    });
+    if (interiorFallbackRef.current) {
+      interiorFallbackRef.current.visible = true;
+    }
+
+    const texture = loader.load(
+      selectedBubble.skybox,
+      (cube) => {
+        cube.colorSpace = THREE.SRGBColorSpace;
+        if (interiorSceneRef.current) {
+          interiorSceneRef.current.background = cube;
+        }
+        if (interiorFallbackRef.current) {
+          interiorFallbackRef.current.visible = false;
+        }
+      },
+      undefined,
+      () => {
+        setInteriorError("Le paysage lointain n'est pas joignable, on garde un halo doux.");
+        if (interiorSceneRef.current) {
+          interiorSceneRef.current.background = null;
+        }
+        if (interiorFallbackRef.current) {
+          interiorFallbackRef.current.visible = true;
+        }
+      },
+    );
 
     return () => {
       if (interiorSceneRef.current && interiorSceneRef.current.background === texture) {
@@ -1055,6 +1093,7 @@ export default function App() {
                 <div className="interior-shell">
                   <div ref={interiorContainerRef} className="interior-view" />
                   <p className="immersive-hint">Glisser ou bouger l'appareil pour contempler en 360°.</p>
+                  {interiorError && <p className="interior-warning">{interiorError}</p>}
                 </div>
               </div>
 
