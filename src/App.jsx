@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import gsap from 'gsap';
@@ -185,17 +185,9 @@ export default function App() {
   const focusedBubbleRef = useRef(null);
 
   const [bubbles, setBubbles] = useState(generateBubbles);
-  const [filterMode, setFilterMode] = useState('all');
   const [focusedBubble, setFocusedBubble] = useState(null);
   const [isInteriorOpen, setIsInteriorOpen] = useState(false);
   const [seedInput, setSeedInput] = useState('');
-  const [newBubbleData, setNewBubbleData] = useState({
-    title: '',
-    note: '',
-    skyboxUrl: '',
-    fx: '',
-    connections: [],
-  });
 
   const [syncEvents, setSyncEvents] = useState([]);
 
@@ -244,67 +236,6 @@ export default function App() {
     focusedBubbleRef.current = null;
   };
 
-  const handleCreateBubble = (event) => {
-    event.preventDefault();
-    const selectedConnections = (newBubbleData.connections && newBubbleData.connections.length > 0)
-      ? newBubbleData.connections
-      : focusedBubble
-        ? [focusedBubble.id]
-        : [];
-    const title = newBubbleData.title.trim() || 'Bulle inédite';
-    const note = newBubbleData.note.trim();
-    const skyboxUrl = newBubbleData.skyboxUrl.trim();
-    const fx = newBubbleData.fx.trim();
-    const seedTags = ensureTags(note, title);
-
-    setBubbles((prev) => {
-      const nextIndex = prev.length + 1;
-      const id = `bulle-${nextIndex}`;
-      const color = palette[nextIndex % palette.length];
-
-      const anchors = prev.filter((bubble) => selectedConnections.includes(bubble.id));
-      const center = anchors.reduce((acc, bubble) => acc.add(bubble.position), new THREE.Vector3());
-      const position = anchors.length
-        ? center.divideScalar(anchors.length).add(new THREE.Vector3(
-          (Math.random() - 0.5) * 2.4,
-          (Math.random() - 0.5) * 1.6,
-          (Math.random() - 0.5) * 2.4,
-        ))
-        : (() => {
-          const angle = Math.random() * Math.PI * 2;
-          const radius = 9 + Math.random() * 6;
-          const height = (Math.random() - 0.5) * 6;
-          return new THREE.Vector3(
-            Math.cos(angle) * radius,
-            height,
-            Math.sin(angle) * radius,
-          );
-        })();
-
-      const updatedBubbles = prev.map((bubble) => {
-        if (!selectedConnections.includes(bubble.id)) return bubble;
-        return { ...bubble, connections: Array.from(new Set([...(bubble.connections || []), id])) };
-      });
-
-      const newBubble = {
-        id,
-        title,
-        note,
-        skyboxUrl,
-        fx,
-        seedTags,
-        connections: [...selectedConnections],
-        color,
-        position,
-        createdAt: Date.now(),
-        isRecent: true,
-      };
-
-      return [...updatedBubbles, newBubble];
-    });
-    setNewBubbleData({ title: '', note: '', skyboxUrl: '', fx: '', connections: [] });
-  };
-
   const focusBubble = (mesh) => {
     if (!mesh || !cameraRef.current || !controlsRef.current) return;
     const meta = mesh.userData.meta;
@@ -329,17 +260,12 @@ export default function App() {
     });
   };
 
-  const visibleBubbles = useMemo(() => {
-    if (filterMode === 'recent') return bubbles.filter((bubble) => bubble.isRecent);
-    return bubbles;
-  }, [bubbles, filterMode]);
-
   useEffect(() => {
-    if (focusedBubble && !visibleBubbles.some((bubble) => bubble.id === focusedBubble.id)) {
+    if (focusedBubble && !bubbles.some((bubble) => bubble.id === focusedBubble.id)) {
       setFocusedBubble(null);
       focusedBubbleRef.current = null;
     }
-  }, [focusedBubble, visibleBubbles]);
+  }, [bubbles, focusedBubble]);
 
   useEffect(() => {
     if (!sceneContainerRef.current) return undefined;
@@ -388,7 +314,7 @@ export default function App() {
     const geometry = new THREE.SphereGeometry(1.1, 32, 32);
     const atoms = [];
 
-    visibleBubbles.forEach((bubble) => {
+    bubbles.forEach((bubble) => {
       const material = new THREE.MeshPhysicalMaterial({
         color: bubble.color,
         roughness: 0.2,
@@ -432,9 +358,9 @@ export default function App() {
     const lineMaterial = new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.18 });
     const linkPositions = [];
     const addedPairs = new Set();
-    visibleBubbles.forEach((source) => {
+    bubbles.forEach((source) => {
       (source.connections || []).forEach((targetId) => {
-        const target = visibleBubbles.find((candidate) => candidate.id === targetId);
+        const target = bubbles.find((candidate) => candidate.id === targetId);
         if (!target) return;
         const key = [source.id, target.id].sort().join('->');
         if (addedPairs.has(key)) return;
@@ -615,7 +541,7 @@ export default function App() {
       cameraRef.current = null;
       controlsRef.current = null;
     };
-  }, [visibleBubbles]);
+  }, [bubbles]);
 
   useEffect(() => {
     if (!isInteriorOpen || !interiorContainerRef.current || !focusedBubble) return undefined;
@@ -906,30 +832,6 @@ export default function App() {
           </div>
         </div>
 
-        <div className="sidebar-block">
-          <p className="eyebrow">Filtre</p>
-          <div className="segmented" aria-label="Modes de filtre">
-            <button
-              type="button"
-              className={filterMode === 'all' ? 'active' : ''}
-              onClick={() => setFilterMode('all')}
-            >
-              Toutes les bulles
-            </button>
-            <button
-              type="button"
-              className={filterMode === 'recent' ? 'active' : ''}
-              onClick={() => setFilterMode('recent')}
-            >
-              Récemment créées
-            </button>
-          </div>
-          <div className="panel-footer">
-            <span className="chip subtle">Visibles : {visibleBubbles.length}</span>
-            <span className="hint">Chaque clic fait plonger la caméra dans la bulle visée.</span>
-          </div>
-        </div>
-
         <form className="sidebar-block seed-form" onSubmit={handleSeedNetwork}>
           <p className="eyebrow">Ensemencer le réseau</p>
           <p className="muted">Texte + émojis sont transformés en tags flottants attirés par les bulles.</p>
@@ -962,34 +864,6 @@ export default function App() {
             <p className="muted">Sélectionnez une bulle du réseau pour ressentir son intériorité.</p>
           )}
         </div>
-
-        <form className="sidebar-block mini-form" onSubmit={handleCreateBubble}>
-          <p className="eyebrow">Nouvelle bulle</p>
-          <input
-            type="text"
-            value={newBubbleData.title}
-            onChange={(e) => setNewBubbleData((prev) => ({ ...prev, title: e.target.value }))}
-            placeholder="Titre"
-          />
-          <textarea
-            value={newBubbleData.note}
-            onChange={(e) => setNewBubbleData((prev) => ({ ...prev, note: e.target.value }))}
-            placeholder="Fragment poétique ou sensation"
-          />
-          <input
-            type="url"
-            value={newBubbleData.skyboxUrl}
-            onChange={(e) => setNewBubbleData((prev) => ({ ...prev, skyboxUrl: e.target.value }))}
-            placeholder="Skybox (URL optionnelle)"
-          />
-          <input
-            type="text"
-            value={newBubbleData.fx}
-            onChange={(e) => setNewBubbleData((prev) => ({ ...prev, fx: e.target.value }))}
-            placeholder="FX particules ou ambiance"
-          />
-          <button type="submit" className="ghost">Ajouter au réseau</button>
-        </form>
 
         <div className="sidebar-block sync-feed">
           <p className="eyebrow">Flux</p>

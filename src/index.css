@@ -99,58 +99,6 @@ p {
   background: radial-gradient(circle at 50% 50%, rgba(255, 255, 255, 0.04), rgba(2, 6, 16, 0.98));
 }
 
-.panel-footer {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
-}
-
-.hint {
-  color: rgba(232, 247, 255, 0.75);
-  font-size: 14px;
-}
-
-.filter-bar {
-  margin: 14px 0 22px;
-  padding: 12px 14px;
-  border-radius: 14px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: linear-gradient(120deg, rgba(0, 58, 122, 0.16), rgba(123, 255, 191, 0.08));
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  flex-wrap: wrap;
-  justify-content: space-between;
-}
-
-.filter-copy {
-  max-width: 420px;
-}
-
-.segmented {
-  display: inline-flex;
-  background: rgba(255, 255, 255, 0.06);
-  border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  overflow: hidden;
-}
-
-.segmented button {
-  border: none;
-  background: transparent;
-  color: #f5fbff;
-  padding: 10px 14px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: background 0.2s ease, color 0.2s ease;
-}
-
-.segmented button.active {
-  background: rgba(255, 255, 255, 0.1);
-  color: #0a132b;
-}
-
 .interior-modal {
   width: min(1020px, 100%);
 }
