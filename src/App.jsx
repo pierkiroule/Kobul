@@ -1229,26 +1229,50 @@ export default function App() {
       </aside>
 
       <main className="stage">
-        <div className="scene" aria-label="Réseau de bulles 3D">
-          <div ref={sceneContainerRef} className="experience" />
-          {isInteriorOpen && focusedBubble && (
-            <div className="interior-window" role="region" aria-label="Intérieur de la bulle">
-              <div className="interior-window-header">
-                <div>
-                  <p className="eyebrow">Intérieur</p>
-                  <h3>{focusedBubble.title}</h3>
-                </div>
-                <span className="chip subtle">Caméra 360° · Gyro</span>
-                <button type="button" className="ghost" onClick={handleExitInterior}>Sortir</button>
+        <div className="scene" aria-label="Réseau de bulles 3D et intérieur">
+          <section className="scene-panel network-panel" aria-label="Réseau de bulles 3D">
+            <div className="panel-header">
+              <div>
+                <p className="eyebrow">Réseau</p>
+                <h3>Constellation vivante</h3>
               </div>
-              <div className="tag-cloud" aria-label="Tags intégrés">
-                {(focusedBubble.seedTags || ensureTags(focusedBubble.note, focusedBubble.title)).map((tag) => (
-                  <span key={tag} className="chip subtle">{tag}</span>
-                ))}
+              <div className="panel-actions">
+                <button type="button" className="ghost" onClick={resetView}>Recentrer</button>
+                <button type="button" className="ghost" onClick={handleExitInterior} disabled={!focusedBubble}>
+                  Sortir d'une bulle
+                </button>
               </div>
-              <div className="interior-viewport" ref={interiorContainerRef} aria-label="Micro réseau" />
             </div>
-          )}
+            <div ref={sceneContainerRef} className="experience" />
+          </section>
+
+          <section className="scene-panel interior-panel" aria-label="Intérieur de la bulle">
+            <div className="panel-header">
+              <div>
+                <p className="eyebrow">Intérieur</p>
+                <h3>{focusedBubble ? focusedBubble.title : 'Choisissez une bulle'}</h3>
+              </div>
+              {focusedBubble && (
+                <div className="panel-actions">
+                  <span className="chip subtle">Caméra 360° · Gyro</span>
+                  <button type="button" className="ghost" onClick={handleExitInterior}>Sortir</button>
+                </div>
+              )}
+            </div>
+
+            {isInteriorOpen && focusedBubble ? (
+              <>
+                <div className="tag-cloud" aria-label="Tags intégrés">
+                  {(focusedBubble.seedTags || ensureTags(focusedBubble.note, focusedBubble.title)).map((tag) => (
+                    <span key={tag} className="chip subtle">{tag}</span>
+                  ))}
+                </div>
+                <div className="interior-viewport" ref={interiorContainerRef} aria-label="Micro réseau" />
+              </>
+            ) : (
+              <p className="muted">Entrer dans une bulle pour ouvrir la vue panoramique 360° dédiée.</p>
+            )}
+          </section>
         </div>
       </main>
     </div>
