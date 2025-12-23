@@ -398,6 +398,7 @@ export default function App() {
     window.addEventListener('resize', updateRendererSize);
 
     const clock = new THREE.Clock();
+    let frameId;
     const animate = () => {
       const elapsed = clock.getElapsedTime();
 
@@ -473,11 +474,11 @@ export default function App() {
 
       controls.update();
       renderer.render(scene, camera);
-      requestAnimationFrame(animate);
+      frameId = requestAnimationFrame(animate);
     };
 
     animate();
-    handleResize();
+    updateRendererSize();
 
     return () => {
       renderer.domElement.removeEventListener('pointerdown', onScenePointer);
