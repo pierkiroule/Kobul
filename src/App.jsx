@@ -1036,6 +1036,13 @@ export default function App() {
     resetView();
   };
 
+  const handleEnterInterior = () => {
+    if (!focusedBubble) return;
+    pendingEntryRef.current = false;
+    setIsInteriorOpen(true);
+    logEvent(`${focusedBubble.title} ouverte manuellement : immersion 360°.`);
+  };
+
   const createMiniNetwork = (tags) => {
     if (!interiorNetworkGroupRef.current) return null;
     const group = new THREE.Group();
@@ -1133,6 +1140,14 @@ export default function App() {
               <div className="bubble-meta">
                 <span className="chip">Skybox : {focusedBubble.skyboxUrl || 'à venir'}</span>
                 <span className="chip">FX : {focusedBubble.fx || 'silence'}</span>
+              </div>
+              <div className="control-row">
+                <button type="button" className="primary" onClick={handleEnterInterior}>
+                  Entrer dans la bulle
+                </button>
+                <button type="button" className="ghost" onClick={handleExitInterior}>
+                  Quitter la bulle
+                </button>
               </div>
             </>
           ) : (
