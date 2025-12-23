@@ -88,6 +88,38 @@ p {
   background: radial-gradient(circle at 50% 50%, rgba(255, 255, 255, 0.04), rgba(2, 6, 16, 0.98));
 }
 
+.floating-panel {
+  position: absolute;
+  left: 16px;
+  right: 16px;
+  bottom: 16px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: linear-gradient(120deg, rgba(0, 58, 122, 0.16), rgba(123, 255, 191, 0.08));
+  backdrop-filter: blur(12px);
+}
+
+.floating-panel .filter-copy {
+  max-width: 420px;
+}
+
+.panel-footer {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.hint {
+  color: rgba(232, 247, 255, 0.75);
+  font-size: 14px;
+}
+
 .filter-bar {
   margin: 14px 0 22px;
   padding: 12px 14px;
@@ -126,6 +158,10 @@ p {
 .segmented button.active {
   background: rgba(255, 255, 255, 0.1);
   color: #0a132b;
+}
+
+.interior-modal {
+  width: min(1020px, 100%);
 }
 
 .chip.subtle {

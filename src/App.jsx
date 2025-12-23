@@ -159,6 +159,8 @@ export default function App() {
   const atomsRef = useRef([]);
   const haloRef = useRef(null);
   const frameIdRef = useRef(null);
+  const longPressTimeoutRef = useRef(null);
+  const pointerTargetRef = useRef(null);
 
   const interiorRendererRef = useRef(null);
   const interiorSceneRef = useRef(null);
@@ -276,7 +278,7 @@ export default function App() {
     if (!mesh || !cameraRef.current || !controlsRef.current) return;
     const meta = mesh.userData.meta;
     setFocusedBubble(meta);
-    setShowEntryPrompt(true);
+    setShowEntryPrompt(false);
     focusedBubbleRef.current = meta;
 
     gsap.to(cameraRef.current.position, {
@@ -437,11 +439,33 @@ export default function App() {
       raycaster.setFromCamera(pointer, camera);
       const hits = raycaster.intersectObjects(atoms);
       if (hits.length) {
-        focusBubble(hits[0].object);
+        const target = hits[0].object;
+        focusBubble(target);
+        pointerTargetRef.current = target;
+        if (longPressTimeoutRef.current) clearTimeout(longPressTimeoutRef.current);
+        longPressTimeoutRef.current = setTimeout(() => {
+          if (pointerTargetRef.current === target) {
+            handleEnter();
+          }
+        }, 650);
       }
     };
 
+    const clearLongPress = () => {
+      if (longPressTimeoutRef.current) {
+        clearTimeout(longPressTimeoutRef.current);
+        longPressTimeoutRef.current = null;
+      }
+      pointerTargetRef.current = null;
+    };
+
+    const onPointerUp = () => clearLongPress();
+    const onPointerOut = () => clearLongPress();
+
     renderer.domElement.addEventListener('pointerdown', onPointerDown);
+    renderer.domElement.addEventListener('pointerup', onPointerUp);
+    renderer.domElement.addEventListener('pointerleave', onPointerOut);
+    renderer.domElement.addEventListener('pointercancel', onPointerOut);
     const resizeObserver = new ResizeObserver(updateSize);
     resizeObserver.observe(sceneContainerRef.current);
     window.addEventListener('resize', updateSize);
@@ -480,6 +504,9 @@ export default function App() {
 
     return () => {
       renderer.domElement.removeEventListener('pointerdown', onPointerDown);
+      renderer.domElement.removeEventListener('pointerup', onPointerUp);
+      renderer.domElement.removeEventListener('pointerleave', onPointerOut);
+      renderer.domElement.removeEventListener('pointercancel', onPointerOut);
       resizeObserver.disconnect();
       window.removeEventListener('resize', updateSize);
       if (frameIdRef.current) cancelAnimationFrame(frameIdRef.current);
@@ -749,92 +776,81 @@ export default function App() {
       <div className="scene" aria-label="Réseau de bulles 3D">
         <div ref={sceneContainerRef} className="experience" />
 
-        {showEntryPrompt && focusedBubble && !isInteriorOpen && (
-          <div className="entry-card">
-            <p className="eyebrow">Invitation</p>
-            <h2>Entrer dans {focusedBubble.title} ?</h2>
-            <p>La caméra s\'est rapprochée. Entrez pour découvrir et planter des textes.</p>
-            {focusedBubble.note && <p className="muted">{focusedBubble.note}</p>}
-            <div className="actions">
-              <button type="button" className="primary" onClick={handleEnter}>
-                Entrer dans la bulle
-              </button>
-              <button type="button" className="ghost" onClick={resetView}>
-                Rester dans le réseau
-              </button>
-            </div>
+        <div className="floating-panel" role="group" aria-label="Filtrer l'affichage des bulles">
+          <div className="filter-copy">
+            <p className="eyebrow">Filtre d'affichage</p>
+            <p className="muted">Choisissez quelles bulles flottent : toutes ou seulement les nouvelles.</p>
           </div>
-        )}
-      </div>
+          <div className="segmented" aria-label="Modes de filtre">
+            <button
+              type="button"
+              className={filterMode === 'all' ? 'active' : ''}
+              onClick={() => setFilterMode('all')}
+            >
+              Toutes les bulles
+            </button>
+            <button
+              type="button"
+              className={filterMode === 'recent' ? 'active' : ''}
+              onClick={() => setFilterMode('recent')}
+            >
+              Récemment créées
+            </button>
+          </div>
+          <div className="panel-footer">
+            <span className="chip subtle">Visibles : {visibleBubbles.length}</span>
+            <span className="hint">Maintenez une bulle pour entrer dans son intérieur.</span>
+          </div>
+        </div>
 
-      <div className="filter-bar" role="group" aria-label="Filtrer l'affichage des bulles">
-        <div className="filter-copy">
-          <p className="eyebrow">Filtre d'affichage</p>
-          <p className="muted">Choisissez quelles bulles flottent dans la scène : toutes ou seulement les nouvelles.</p>
-        </div>
-        <div className="segmented" aria-label="Modes de filtre">
-          <button
-            type="button"
-            className={filterMode === 'all' ? 'active' : ''}
-            onClick={() => setFilterMode('all')}
-          >
-            Toutes les bulles
-          </button>
-          <button
-            type="button"
-            className={filterMode === 'recent' ? 'active' : ''}
-            onClick={() => setFilterMode('recent')}
-          >
-            Récemment créées
-          </button>
-        </div>
-        <span className="chip subtle">Visibles : {visibleBubbles.length}</span>
       </div>
 
       {isInteriorOpen && focusedBubble && (
-        <div className="interior">
-          <div className="interior-header">
-            <div>
-              <p className="eyebrow">Intérieur</p>
-              <h2>{focusedBubble.title}</h2>
-              <p className="lede">
-                Semez un texte. Il devient un mini-réseau de tags/émojis flottant, envoyé au serveur lors
-                de chaque synchro. Le texte brut est détruit après transmutation.
-              </p>
-              {focusedBubble.note && <p className="muted">{focusedBubble.note}</p>}
-              <div className="bubble-meta">
-                <span className="chip">Skybox : {focusedBubble.skyboxUrl || 'à venir'}</span>
-                <span className="chip">FX : {focusedBubble.fx || 'silence'}</span>
+        <div className="modal-backdrop" role="dialog" aria-modal="true">
+          <div className="modal interior-modal">
+            <div className="modal-header">
+              <div>
+                <p className="eyebrow">Intérieur</p>
+                <h2>{focusedBubble.title}</h2>
+                <p className="lede">
+                  Semez un texte. Il devient un mini-réseau de tags/émojis flottant, envoyé au serveur lors
+                  de chaque synchro. Le texte brut est détruit après transmutation.
+                </p>
+                {focusedBubble.note && <p className="muted">{focusedBubble.note}</p>}
+                <div className="bubble-meta">
+                  <span className="chip">Skybox : {focusedBubble.skyboxUrl || 'à venir'}</span>
+                  <span className="chip">FX : {focusedBubble.fx || 'silence'}</span>
+                </div>
               </div>
+              <button type="button" className="ghost" onClick={handleExitInterior}>
+                Quitter la bulle
+              </button>
             </div>
-            <button type="button" className="ghost" onClick={handleExitInterior}>
-              Quitter la bulle
-            </button>
-          </div>
 
-          <div className="interior-body">
-            <div className="interior-viewport" ref={interiorContainerRef} />
-            <form className="note-form" onSubmit={handleAddNote}>
-              <label htmlFor="note">Texte à semer</label>
-              <input
-                id="note"
-                type="text"
-                value={newNote}
-                onChange={(e) => setNewNote(e.target.value)}
-                placeholder="Un mot, une phrase, une pluie d'émojis..."
-              />
-              <button type="submit" className="primary">Planter</button>
-            </form>
-            <div className="sync-feed">
-              {syncEvents.length === 0 ? (
-                <p className="muted">Chaque transmutation sera envoyée puis effacée ici.</p>
-              ) : (
-                <ul>
-                  {syncEvents.map((event) => (
-                    <li key={event.id}>{event.message}</li>
-                  ))}
-                </ul>
-              )}
+            <div className="interior-body">
+              <div className="interior-viewport" ref={interiorContainerRef} />
+              <form className="note-form" onSubmit={handleAddNote}>
+                <label htmlFor="note">Texte à semer</label>
+                <input
+                  id="note"
+                  type="text"
+                  value={newNote}
+                  onChange={(e) => setNewNote(e.target.value)}
+                  placeholder="Un mot, une phrase, une pluie d'émojis..."
+                />
+                <button type="submit" className="primary">Planter</button>
+              </form>
+              <div className="sync-feed">
+                {syncEvents.length === 0 ? (
+                  <p className="muted">Chaque transmutation sera envoyée puis effacée ici.</p>
+                ) : (
+                  <ul>
+                    {syncEvents.map((event) => (
+                      <li key={event.id}>{event.message}</li>
+                    ))}
+                  </ul>
+                )}
+              </div>
             </div>
           </div>
         </div>
