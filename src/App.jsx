@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import gsap from 'gsap';
@@ -107,6 +107,8 @@ function generateBubbles() {
       skyboxUrl: '',
       fx: '',
       seedTags: tokenizeText(poeticTexts[index]),
+      createdAt: Date.now() - 1000 * 60 * 20 - index * 1000,
+      isRecent: false,
       connections: [],
       color: palette[index % palette.length],
       position,
@@ -169,6 +171,7 @@ export default function App() {
   const focusedBubbleRef = useRef(null);
 
   const [bubbles, setBubbles] = useState(generateBubbles);
+  const [filterMode, setFilterMode] = useState('all');
 
   const [focusedBubble, setFocusedBubble] = useState(null);
   const [showEntryPrompt, setShowEntryPrompt] = useState(false);
@@ -251,6 +254,8 @@ export default function App() {
         connections: [...selectedConnections],
         color,
         position,
+        createdAt: Date.now(),
+        isRecent: true,
       };
 
       return [...updatedBubbles, newBubble];
@@ -289,6 +294,19 @@ export default function App() {
       ease: 'power2.inOut',
     });
   };
+
+  const visibleBubbles = useMemo(() => {
+    if (filterMode === 'recent') return bubbles.filter((bubble) => bubble.isRecent);
+    return bubbles;
+  }, [bubbles, filterMode]);
+
+  useEffect(() => {
+    if (focusedBubble && !visibleBubbles.some((bubble) => bubble.id === focusedBubble.id)) {
+      setFocusedBubble(null);
+      setShowEntryPrompt(false);
+      focusedBubbleRef.current = null;
+    }
+  }, [focusedBubble, visibleBubbles]);
 
   useEffect(() => {
     if (!sceneContainerRef.current) return undefined;
@@ -337,7 +355,7 @@ export default function App() {
     const geometry = new THREE.SphereGeometry(1.1, 32, 32);
     const atoms = [];
 
-    bubbles.forEach((bubble) => {
+    visibleBubbles.forEach((bubble) => {
       const material = new THREE.MeshPhysicalMaterial({
         color: bubble.color,
         roughness: 0.2,
@@ -376,9 +394,9 @@ export default function App() {
     const lineMaterial = new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.18 });
     const linkPositions = [];
     const addedPairs = new Set();
-    bubbles.forEach((source) => {
+    visibleBubbles.forEach((source) => {
       (source.connections || []).forEach((targetId) => {
-        const target = bubbles.find((candidate) => candidate.id === targetId);
+        const target = visibleBubbles.find((candidate) => candidate.id === targetId);
         if (!target) return;
         const key = [source.id, target.id].sort().join('->');
         if (addedPairs.has(key)) return;
@@ -479,7 +497,7 @@ export default function App() {
       cameraRef.current = null;
       controlsRef.current = null;
     };
-  }, [bubbles]);
+  }, [visibleBubbles]);
 
   useEffect(() => {
     if (!isInteriorOpen || !interiorContainerRef.current || !focusedBubble) return undefined;
@@ -747,6 +765,30 @@ export default function App() {
             </div>
           </div>
         )}
+      </div>
+
+      <div className="filter-bar" role="group" aria-label="Filtrer l'affichage des bulles">
+        <div className="filter-copy">
+          <p className="eyebrow">Filtre d'affichage</p>
+          <p className="muted">Choisissez quelles bulles flottent dans la scène : toutes ou seulement les nouvelles.</p>
+        </div>
+        <div className="segmented" aria-label="Modes de filtre">
+          <button
+            type="button"
+            className={filterMode === 'all' ? 'active' : ''}
+            onClick={() => setFilterMode('all')}
+          >
+            Toutes les bulles
+          </button>
+          <button
+            type="button"
+            className={filterMode === 'recent' ? 'active' : ''}
+            onClick={() => setFilterMode('recent')}
+          >
+            Récemment créées
+          </button>
+        </div>
+        <span className="chip subtle">Visibles : {visibleBubbles.length}</span>
       </div>
 
       {isInteriorOpen && focusedBubble && (
