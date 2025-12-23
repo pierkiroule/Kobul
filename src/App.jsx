@@ -1,7 +1,8 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import gsap from 'gsap';
+import { generatePunchlines } from './services/generatePunchlines';
 
 export default function App() {
   const sceneContainerRef = useRef(null);
@@ -34,6 +35,8 @@ export default function App() {
     clamped: false,
     direction: 'center',
   });
+  const [punchlineDraft, setPunchlineDraft] = useState('');
+  const [isGeneratingPunchlines, setIsGeneratingPunchlines] = useState(false);
 
   const audioRef = useRef(null);
   const audioContextRef = useRef(null);
@@ -41,7 +44,6 @@ export default function App() {
   const dataArrayRef = useRef(null);
   const smoothedLevelRef = useRef(0);
   const sourceRef = useRef(null);
-  const lastBurstRef = useRef(0);
   const fileInputRef = useRef(null);
   const controlsRef = useRef(null);
   const rendererRef = useRef(null);
@@ -51,12 +53,14 @@ export default function App() {
   const bubbleMaterialsRef = useRef([]);
   const haloRef = useRef(null);
   const cameraRef = useRef(null);
-  const controlsRef = useRef(null);
-  const rendererRef = useRef(null);
   const focusTargetRef = useRef(null);
   const selectedMeshRef = useRef(null);
   const lastTapRef = useRef({ time: 0, id: null });
   const lastBurstRef = useRef(0);
+  const isReadyToEnterRef = useRef(false);
+  const interiorContainerRef = useRef(null);
+  const carouselRef = useRef(null);
+  const addBubbleToSceneRef = useRef(null);
 
   const interiorSceneRef = useRef(null);
   const interiorRendererRef = useRef(null);
@@ -100,7 +104,9 @@ export default function App() {
         })),
       };
     });
-  }, []);
+  }, [isTouchOnUi]);
+
+  const [liveBubbles, setLiveBubbles] = useState(() => bubbles);
 
   const focusBubbleOnMesh = (mesh) => {
     if (!mesh || !cameraRef.current || !controlsRef.current) return;
@@ -115,6 +121,8 @@ export default function App() {
       playlist: bubbleMeta.playlist,
       color: bubbleMeta.color,
     });
+    setIsReadyToEnter(true);
+    isReadyToEnterRef.current = true;
 
     gsap.to(cameraRef.current.position, {
       x: mesh.position.x,
@@ -175,7 +183,6 @@ export default function App() {
     updateRendererSize();
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     rendererRef.current = renderer;
-    networkCanvasRef.current.appendChild(renderer.domElement);
 
     const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
     scene.add(ambientLight);
@@ -267,6 +274,9 @@ export default function App() {
       atoms.push(mesh);
       bubbleMaterials.push(material);
 
+      atomsRef.current = atoms;
+      bubbleMaterialsRef.current = bubbleMaterials;
+
       const pointLight = new THREE.PointLight(bubbleData.color, 1.2, 7);
       mesh.add(pointLight);
     };
@@ -274,6 +284,7 @@ export default function App() {
     bubbles.forEach((bubble) => createAtom(bubble));
     atomsRef.current = atoms;
     bubbleMaterialsRef.current = bubbleMaterials;
+    addBubbleToSceneRef.current = createAtom;
 
     const haloGeometry = new THREE.SphereGeometry(1.55, 48, 48);
     const haloMaterial = new THREE.MeshBasicMaterial({
@@ -550,6 +561,12 @@ export default function App() {
       controlsRef.current.enabled = !prefersUi;
     }
 
+    if (!interiorContainerRef.current) return undefined;
+
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(60, 1, 0.1, 100);
+    camera.position.set(0, 0, 6);
+
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     renderer.setSize(interiorContainerRef.current.clientWidth, interiorContainerRef.current.clientHeight);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -667,6 +684,9 @@ export default function App() {
       particlesMat.dispose();
       videoTexture.dispose();
       renderer.dispose();
+      if (interiorContainerRef.current?.contains(renderer.domElement)) {
+        interiorContainerRef.current.removeChild(renderer.domElement);
+      }
     };
   }, []);
 
@@ -707,6 +727,15 @@ export default function App() {
     if (particles) {
       particles.material.color = new THREE.Color(selectedBubble.color);
     }
+  }, [selectedBubble]);
+
+  useEffect(() => {
+    if (!selectedBubble) return;
+    setCarouselIndex(0);
+    setActiveMediaUrl(selectedBubble.playlist?.[0]?.url || '');
+    setIsReadyToEnter(true);
+    isReadyToEnterRef.current = true;
+  }, [selectedBubble]);
 
   const handleEnterTap = () => {
     if (!selectedBubble) {
@@ -739,13 +768,58 @@ export default function App() {
     });
   };
 
+  const createPunchlineBubble = (line, offset = 0) => {
+    const baseIndex = liveBubbles.length + offset;
+    const angle = baseIndex * 0.7;
+    const distance = 12 + Math.random() * 4;
+    const height = (Math.random() - 0.5) * 6;
+
+    return {
+      id: `punch-${Date.now()}-${offset}`,
+      title: line,
+      color: palette[baseIndex % palette.length],
+      position: new THREE.Vector3(
+        Math.cos(angle) * distance,
+        height,
+        Math.sin(angle) * distance,
+      ),
+      playlist: basePlaylist.map((item, itemIndex) => ({
+        ...item,
+        url: `${item.url}${item.url.includes('?') ? '&' : '?'}p=${baseIndex}-${itemIndex}`,
+      })),
+    };
+  };
+
+  const handlePunchlineSubmit = async (event) => {
+    event.preventDefault();
+    const trimmed = punchlineDraft.trim();
+    if (!trimmed) return;
+
+    setIsGeneratingPunchlines(true);
+    try {
+      const punchlines = await generatePunchlines(trimmed);
+      setPunchlineDraft('');
+      if (!punchlines.length) return;
+
+      const created = punchlines.map((line, index) => createPunchlineBubble(line, index));
+      setLiveBubbles((prev) => [...prev, ...created]);
+      created.forEach((bubble) => {
+        if (addBubbleToSceneRef.current) {
+          addBubbleToSceneRef.current(bubble);
+        }
+      });
+    } finally {
+      setIsGeneratingPunchlines(false);
+    }
+  };
+
   const openBubbleListPanel = () => {
     setIsMenuOpen(true);
     setIsListOpen(true);
     setShowEnterHint(false);
   };
 
-  const renderMedia = (url) => {
+  const renderMedia = useCallback((url) => {
     if (!url) return null;
     const lower = url.toLowerCase();
     if (lower.match(/\.(mp4|webm)$/)) {
@@ -761,7 +835,59 @@ export default function App() {
     if (lower.match(/\.(png|jpg|jpeg|gif|webp)$/)) {
       return <img src={url} alt="contenu lié" className="media-image" />;
     }
-  }, [selectedBubble]);
+
+    return (
+      <a href={url} target="_blank" rel="noreferrer" className="media-link">
+        ouvrir {url}
+      </a>
+    );
+  }, []);
+
+  const currentPlaylist = selectedBubble?.playlist ?? [];
+
+  const openModalForSelection = () => {
+    if (!selectedBubble) return;
+    setActiveMediaUrl(selectedBubble.playlist?.[0]?.url || '');
+    setIsModalOpen(true);
+  };
+
+  const handleAudioSubmit = (event) => {
+    event.preventDefault();
+    const trimmed = audioUrlInput.trim();
+    if (!trimmed) {
+      setAudioError('ajoutez une URL sonore');
+      return;
+    }
+
+    setAudioError('');
+    setCurrentAudioUrl(trimmed);
+    setIsAudioActive(true);
+    setLocalAudioObjectUrl('');
+
+    setTimeout(() => {
+      audioRef.current?.play().catch(() => {});
+    }, 0);
+  };
+
+  const handleFilePick = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleFileChange = (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    if (localAudioObjectUrl) {
+      URL.revokeObjectURL(localAudioObjectUrl);
+    }
+    const objectUrl = URL.createObjectURL(file);
+    setLocalAudioObjectUrl(objectUrl);
+    setCurrentAudioUrl(objectUrl);
+    setIsAudioActive(true);
+    setAudioError('');
+    setTimeout(() => {
+      audioRef.current?.play().catch(() => {});
+    }, 0);
+  };
 
   const handlePilotagePointerDown = (event) => {
     event.stopPropagation();
@@ -921,7 +1047,7 @@ export default function App() {
               </div>
               {isListOpen && (
                 <div className="bubble-list">
-                  {bubbles.map((bubble, index) => (
+                  {liveBubbles.map((bubble, index) => (
                     <button
                       key={bubble.id}
                       type="button"
@@ -1079,6 +1205,31 @@ export default function App() {
         </div>
       </div>
 
+      <form className="appel-bar" onSubmit={handlePunchlineSubmit}>
+        <div>
+          <p className="hud-kicker">Appel</p>
+          <p className="appel-title">Semer une phrase pour faire naître de nouvelles bulles</p>
+          <p className="hud-sub">Chaque soumission génère plusieurs punchlines et les envoie dans la scène.</p>
+        </div>
+
+        <div className="appel-controls">
+          <input
+            value={punchlineDraft}
+            onChange={(event) => setPunchlineDraft(event.target.value)}
+            placeholder="Tapez quelques mots, une phrase, un souffle..."
+            className="appel-input"
+            aria-label="Texte source pour générer des punchlines"
+          />
+          <button
+            type="submit"
+            className="appel-button"
+            disabled={isGeneratingPunchlines || !punchlineDraft.trim()}
+          >
+            {isGeneratingPunchlines ? 'génération...' : 'générer des punchlines'}
+          </button>
+        </div>
+      </form>
+
       {isModalOpen && selectedBubble && (
         <div className="modal-overlay" role="dialog" aria-modal="true">
           <div className="modal">
@@ -1110,7 +1261,7 @@ export default function App() {
             </div>
           </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }
