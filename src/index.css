@@ -537,6 +537,50 @@ body {
   font-weight: 600;
 }
 
+.modal-body {
+  display: grid;
+  grid-template-columns: 1.2fr 1fr;
+  gap: 18px;
+  padding: 18px 20px 20px;
+}
+
+.modal-immersive {
+  background: linear-gradient(145deg, rgba(0, 214, 255, 0.08), rgba(255, 79, 212, 0.06));
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 14px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.interior-shell {
+  position: relative;
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: radial-gradient(circle at 20% 20%, rgba(255, 255, 255, 0.08), rgba(8, 14, 28, 0.8));
+  min-height: 280px;
+}
+
+.interior-view {
+  width: 100%;
+  height: 100%;
+}
+
+.immersive-hint {
+  position: absolute;
+  bottom: 10px;
+  right: 12px;
+  margin: 0;
+  font-size: 12px;
+  color: rgba(232, 247, 255, 0.85);
+  background: rgba(0, 0, 0, 0.35);
+  padding: 8px 10px;
+  border-radius: 12px;
+  backdrop-filter: blur(4px);
+}
+
 .close {
   border: 1px solid rgba(255, 255, 255, 0.18);
   background: rgba(255, 255, 255, 0.04);
@@ -558,5 +602,11 @@ body {
 
   .interior-area {
     min-height: 300px;
+  }
+}
+
+@media (max-width: 900px) {
+  .modal-body {
+    grid-template-columns: 1fr;
   }
 }

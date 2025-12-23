@@ -5,6 +5,7 @@ import gsap from 'gsap';
 
 export default function App() {
   const sceneContainerRef = useRef(null);
+  const interiorContainerRef = useRef(null);
   const [selectedBubble, setSelectedBubble] = useState(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [activeMediaUrl, setActiveMediaUrl] = useState('');
@@ -51,19 +52,43 @@ export default function App() {
   const bubbleMaterialsRef = useRef([]);
   const haloRef = useRef(null);
   const cameraRef = useRef(null);
-  const controlsRef = useRef(null);
-  const rendererRef = useRef(null);
   const focusTargetRef = useRef(null);
   const selectedMeshRef = useRef(null);
   const lastTapRef = useRef({ time: 0, id: null });
-  const lastBurstRef = useRef(0);
+  const isReadyToEnterRef = useRef(false);
 
   const interiorSceneRef = useRef(null);
   const interiorRendererRef = useRef(null);
   const interiorCameraRef = useRef(null);
-  const interiorObjectsRef = useRef({ textMesh: null, particles: null, videoMesh: null, videoEl: null });
+  const interiorControlsRef = useRef(null);
 
   const palette = [0x00d4ff, 0xff4fd4, 0x7cf7ff, 0xffd170, 0x7bffbf];
+  const skyboxSets = [
+    [
+      'https://threejs.org/examples/textures/cube/Bridge2/posx.jpg',
+      'https://threejs.org/examples/textures/cube/Bridge2/negx.jpg',
+      'https://threejs.org/examples/textures/cube/Bridge2/posy.jpg',
+      'https://threejs.org/examples/textures/cube/Bridge2/negy.jpg',
+      'https://threejs.org/examples/textures/cube/Bridge2/posz.jpg',
+      'https://threejs.org/examples/textures/cube/Bridge2/negz.jpg',
+    ],
+    [
+      'https://threejs.org/examples/textures/cube/Park2/posx.jpg',
+      'https://threejs.org/examples/textures/cube/Park2/negx.jpg',
+      'https://threejs.org/examples/textures/cube/Park2/posy.jpg',
+      'https://threejs.org/examples/textures/cube/Park2/negy.jpg',
+      'https://threejs.org/examples/textures/cube/Park2/posz.jpg',
+      'https://threejs.org/examples/textures/cube/Park2/negz.jpg',
+    ],
+    [
+      'https://threejs.org/examples/textures/cube/MilkyWay/posx.jpg',
+      'https://threejs.org/examples/textures/cube/MilkyWay/negx.jpg',
+      'https://threejs.org/examples/textures/cube/MilkyWay/posy.jpg',
+      'https://threejs.org/examples/textures/cube/MilkyWay/negy.jpg',
+      'https://threejs.org/examples/textures/cube/MilkyWay/posz.jpg',
+      'https://threejs.org/examples/textures/cube/MilkyWay/negz.jpg',
+    ],
+  ];
 
   const defaultCameraPosition = React.useMemo(() => ({ x: 0, y: 5, z: 20 }), []);
   const defaultTarget = React.useMemo(() => ({ x: 0, y: 0, z: 0 }), []);
@@ -94,6 +119,7 @@ export default function App() {
         title: `Bulle constellation ${index + 1}`,
         color: palette[index % palette.length],
         position,
+        skybox: skyboxSets[index % skyboxSets.length],
         playlist: basePlaylist.map((item, itemIndex) => ({
           ...item,
           url: `${item.url}${item.url.includes('?') ? '&' : '?'}v=${index + itemIndex}`,
@@ -114,7 +140,10 @@ export default function App() {
       title: bubbleMeta.title,
       playlist: bubbleMeta.playlist,
       color: bubbleMeta.color,
+      skybox: bubbleMeta.skybox,
     });
+    setIsReadyToEnter(true);
+    isReadyToEnterRef.current = true;
 
     gsap.to(cameraRef.current.position, {
       x: mesh.position.x,
@@ -175,7 +204,6 @@ export default function App() {
     updateRendererSize();
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     rendererRef.current = renderer;
-    networkCanvasRef.current.appendChild(renderer.domElement);
 
     const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
     scene.add(ambientLight);
@@ -545,116 +573,49 @@ export default function App() {
   }, [sceneSize.width, sceneSize.height, selectedBubble, isReadyToEnter, sceneHeight]);
 
   useEffect(() => {
-    const prefersUi = isTouchOnUi;
-    if (controlsRef.current) {
-      controlsRef.current.enabled = !prefersUi;
-    }
+    if (!isModalOpen) return undefined;
+
+    const container = interiorContainerRef.current;
+    if (!container) return undefined;
+
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(72, container.clientWidth / container.clientHeight || 1, 0.1, 100);
+    camera.position.set(0, 0, 0.01);
 
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-    renderer.setSize(interiorContainerRef.current.clientWidth, interiorContainerRef.current.clientHeight);
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    renderer.setSize(container.clientWidth || 1, container.clientHeight || 1);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    interiorContainerRef.current.appendChild(renderer.domElement);
+    container.innerHTML = '';
+    container.appendChild(renderer.domElement);
 
-    const cubeLoader = new THREE.CubeTextureLoader();
-    scene.background = cubeLoader.load([
-      'https://threejs.org/examples/textures/cube/Bridge2/posx.jpg',
-      'https://threejs.org/examples/textures/cube/Bridge2/negx.jpg',
-      'https://threejs.org/examples/textures/cube/Bridge2/posy.jpg',
-      'https://threejs.org/examples/textures/cube/Bridge2/negy.jpg',
-      'https://threejs.org/examples/textures/cube/Bridge2/posz.jpg',
-      'https://threejs.org/examples/textures/cube/Bridge2/negz.jpg',
-    ]);
+    const controls = new OrbitControls(camera, renderer.domElement);
+    controls.enableZoom = false;
+    controls.enablePan = false;
+    controls.enableDamping = true;
+    controls.rotateSpeed = 0.45;
 
-    const interiorAmbient = new THREE.AmbientLight(0xffffff, 0.8);
-    scene.add(interiorAmbient);
-    const interiorPoint = new THREE.PointLight(0xffffff, 1.2, 12);
-    interiorPoint.position.set(2.5, 2.5, 3.5);
-    scene.add(interiorPoint);
-
-    const particlesGeom = new THREE.BufferGeometry();
-    const particleCount = 500;
-    const particlePositions = new Float32Array(particleCount * 3);
-    for (let i = 0; i < particleCount; i += 1) {
-      particlePositions[i * 3] = THREE.MathUtils.randFloatSpread(8);
-      particlePositions[i * 3 + 1] = THREE.MathUtils.randFloatSpread(4);
-      particlePositions[i * 3 + 2] = THREE.MathUtils.randFloatSpread(8);
-    }
-    particlesGeom.setAttribute('position', new THREE.Float32BufferAttribute(particlePositions, 3));
-    const particlesMat = new THREE.PointsMaterial({
-      color: 0x7cf7ff,
-      size: 0.04,
-      transparent: true,
-      opacity: 0.65,
-      depthWrite: false,
-    });
-    const particles = new THREE.Points(particlesGeom, particlesMat);
-    scene.add(particles);
-
-    const createTextMesh = (text, color = '#ffffff') => {
-      const canvas = document.createElement('canvas');
-      canvas.width = 512;
-      canvas.height = 256;
-      const ctx = canvas.getContext('2d');
-      ctx.fillStyle = 'rgba(0,0,0,0)';
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-      ctx.fillStyle = color;
-      ctx.font = 'bold 48px Inter, sans-serif';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(text, canvas.width / 2, canvas.height / 2);
-
-      const texture = new THREE.CanvasTexture(canvas);
-      texture.needsUpdate = true;
-      const material = new THREE.MeshBasicMaterial({ map: texture, transparent: true });
-      const geometry = new THREE.PlaneGeometry(2.8, 1.4);
-      return new THREE.Mesh(geometry, material);
-    };
-
-    const textMesh = createTextMesh('Choisissez une bulle');
-    textMesh.position.set(0, 1.4, 0);
-    scene.add(textMesh);
-
-    const video = document.createElement('video');
-    video.src = 'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4';
-    video.loop = true;
-    video.muted = true;
-    video.playsInline = true;
-
-    const videoTexture = new THREE.VideoTexture(video);
-    videoTexture.minFilter = THREE.LinearFilter;
-    videoTexture.magFilter = THREE.LinearFilter;
-    const videoMaterial = new THREE.MeshBasicMaterial({ map: videoTexture, side: THREE.DoubleSide, transparent: true, opacity: 0.9 });
-    const videoPlane = new THREE.Mesh(new THREE.PlaneGeometry(2.8, 1.6), videoMaterial);
-    videoPlane.position.set(0, 0.1, -1.6);
-    scene.add(videoPlane);
+    const glow = new THREE.AmbientLight(0xffffff, 0.6);
+    scene.add(glow);
 
     interiorSceneRef.current = scene;
     interiorCameraRef.current = camera;
     interiorRendererRef.current = renderer;
-    interiorObjectsRef.current = {
-      textMesh,
-      particles,
-      videoMesh: videoPlane,
-      videoEl: video,
-    };
+    interiorControlsRef.current = controls;
 
     const handleResize = () => {
-      if (!interiorContainerRef.current) return;
-      const { clientWidth: w, clientHeight: h } = interiorContainerRef.current;
+      const { clientWidth: w = 1, clientHeight: h = 1 } = interiorContainerRef.current || {};
       camera.aspect = w / h;
       camera.updateProjectionMatrix();
       renderer.setSize(w, h);
       renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     };
 
-    const clock = new THREE.Clock();
+    let frameId;
     const animate = () => {
-      const elapsed = clock.getElapsedTime();
-      particles.rotation.y = elapsed * 0.08;
-      textMesh.position.y = 1.4 + Math.sin(elapsed * 1.3) * 0.12;
-      videoPlane.position.y = 0.1 + Math.sin(elapsed * 0.9) * 0.08;
+      controls.update();
       renderer.render(scene, camera);
-      requestAnimationFrame(animate);
+      frameId = requestAnimationFrame(animate);
     };
 
     animate();
@@ -663,50 +624,20 @@ export default function App() {
 
     return () => {
       window.removeEventListener('resize', handleResize);
-      particlesGeom.dispose();
-      particlesMat.dispose();
-      videoTexture.dispose();
+      if (frameId) cancelAnimationFrame(frameId);
+      controls.dispose();
       renderer.dispose();
     };
-  }, []);
+  }, [isModalOpen]);
 
   useEffect(() => {
-    if (!selectedBubble || !interiorSceneRef.current || !interiorObjectsRef.current) return;
+    if (!selectedBubble || !interiorSceneRef.current) return;
 
-    const { textMesh, particles, videoMesh, videoEl } = interiorObjectsRef.current;
-
-    if (textMesh) {
-      textMesh.material.map.dispose();
-      textMesh.material.dispose();
-      textMesh.geometry.dispose();
-      interiorSceneRef.current.remove(textMesh);
-      const updated = (() => {
-        const canvas = document.createElement('canvas');
-        canvas.width = 512;
-        canvas.height = 256;
-        const ctx = canvas.getContext('2d');
-        ctx.fillStyle = 'rgba(0,0,0,0)';
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-        ctx.fillStyle = '#e8f7ff';
-        ctx.font = 'bold 46px Inter, sans-serif';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(selectedBubble.title, canvas.width / 2, canvas.height / 2);
-        const texture = new THREE.CanvasTexture(canvas);
-        texture.needsUpdate = true;
-        const material = new THREE.MeshBasicMaterial({ map: texture, transparent: true });
-        const geometry = new THREE.PlaneGeometry(3, 1.3);
-        const mesh = new THREE.Mesh(geometry, material);
-        mesh.position.set(0, 1.4, 0);
-        return mesh;
-      })();
-      interiorSceneRef.current.add(updated);
-      interiorObjectsRef.current.textMesh = updated;
-    }
-
-    if (particles) {
-      particles.material.color = new THREE.Color(selectedBubble.color);
-    }
+    const loader = new THREE.CubeTextureLoader();
+    const texture = loader.load(selectedBubble.skybox);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    interiorSceneRef.current.background = texture;
+  }, [selectedBubble]);
 
   const handleEnterTap = () => {
     if (!selectedBubble) {
@@ -715,6 +646,14 @@ export default function App() {
     }
     setShowEnterHint(false);
     openModalForSelection();
+  };
+
+  const openModalForSelection = () => {
+    if (!selectedBubble) return;
+    setActiveMediaUrl(selectedBubble.playlist?.[0]?.url || '');
+    setIsModalOpen(true);
+    setIsReadyToEnter(true);
+    isReadyToEnterRef.current = true;
   };
 
   const recenterView = () => {
@@ -761,7 +700,12 @@ export default function App() {
     if (lower.match(/\.(png|jpg|jpeg|gif|webp)$/)) {
       return <img src={url} alt="contenu lié" className="media-image" />;
     }
-  }, [selectedBubble]);
+    return (
+      <a href={url} className="media-link" target="_blank" rel="noreferrer">
+        ouvrir {url}
+      </a>
+    );
+  };
 
   const handlePilotagePointerDown = (event) => {
     event.stopPropagation();
@@ -1093,6 +1037,14 @@ export default function App() {
             </div>
 
             <div className="modal-body">
+              <div className="modal-immersive">
+                <p className="hud-label">Paysage interne</p>
+                <div className="interior-shell">
+                  <div ref={interiorContainerRef} className="interior-view" />
+                  <p className="immersive-hint">Glisser ou bouger l'appareil pour contempler en 360°.</p>
+                </div>
+              </div>
+
               <div className="modal-player">{renderMedia(activeMediaUrl)}</div>
               <div className="modal-playlist" aria-label="Playlist de liens">
                 {currentPlaylist.map((item) => (
@@ -1110,7 +1062,7 @@ export default function App() {
             </div>
           </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }
