@@ -169,6 +169,8 @@ export default function App() {
   const haloRef = useRef(null);
   const frameIdRef = useRef(null);
   const longPressTimeoutRef = useRef(null);
+  const longPressTriggeredRef = useRef(false);
+  const pointerOriginRef = useRef({ x: 0, y: 0 });
   const pointerTargetRef = useRef(null);
 
   const interiorRendererRef = useRef(null);
@@ -439,6 +441,7 @@ export default function App() {
 
     const raycaster = new THREE.Raycaster();
     const pointer = new THREE.Vector2();
+    const movementThreshold = 8;
 
     const onPointerDown = (event) => {
       const rect = sceneContainerRef.current?.getBoundingClientRect();
@@ -450,10 +453,13 @@ export default function App() {
       if (hits.length) {
         const target = hits[0].object;
         focusBubble(target);
+        longPressTriggeredRef.current = false;
+        pointerOriginRef.current = { x: event.clientX, y: event.clientY };
         pointerTargetRef.current = target;
         if (longPressTimeoutRef.current) clearTimeout(longPressTimeoutRef.current);
         longPressTimeoutRef.current = setTimeout(() => {
-          if (pointerTargetRef.current === target) {
+          if (pointerTargetRef.current === target && !longPressTriggeredRef.current) {
+            longPressTriggeredRef.current = true;
             handleEnter();
           }
         }, 650);
@@ -465,13 +471,24 @@ export default function App() {
         clearTimeout(longPressTimeoutRef.current);
         longPressTimeoutRef.current = null;
       }
+      longPressTriggeredRef.current = false;
       pointerTargetRef.current = null;
+    };
+
+    const onPointerMove = (event) => {
+      if (!pointerTargetRef.current || longPressTriggeredRef.current) return;
+      const dx = event.clientX - pointerOriginRef.current.x;
+      const dy = event.clientY - pointerOriginRef.current.y;
+      if (Math.hypot(dx, dy) > movementThreshold) {
+        clearLongPress();
+      }
     };
 
     const onPointerUp = () => clearLongPress();
     const onPointerOut = () => clearLongPress();
 
     renderer.domElement.addEventListener('pointerdown', onPointerDown);
+    renderer.domElement.addEventListener('pointermove', onPointerMove);
     renderer.domElement.addEventListener('pointerup', onPointerUp);
     renderer.domElement.addEventListener('pointerleave', onPointerOut);
     renderer.domElement.addEventListener('pointercancel', onPointerOut);
@@ -513,6 +530,7 @@ export default function App() {
 
     return () => {
       renderer.domElement.removeEventListener('pointerdown', onPointerDown);
+      renderer.domElement.removeEventListener('pointermove', onPointerMove);
       renderer.domElement.removeEventListener('pointerup', onPointerUp);
       renderer.domElement.removeEventListener('pointerleave', onPointerOut);
       renderer.domElement.removeEventListener('pointercancel', onPointerOut);
