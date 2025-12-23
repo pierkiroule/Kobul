@@ -957,16 +957,22 @@ export default function App() {
         }
       }
 
+      const zee = new THREE.Vector3(0, 0, 1);
+      const euler = new THREE.Euler();
+      const q0 = new THREE.Quaternion();
+      const q1 = new THREE.Quaternion(-Math.sqrt(0.5), 0, 0, Math.sqrt(0.5));
+
       const setQuaternionFromDevice = (event) => {
         const alpha = THREE.MathUtils.degToRad(event.alpha || 0);
         const beta = THREE.MathUtils.degToRad(event.beta || 0);
         const gamma = THREE.MathUtils.degToRad(event.gamma || 0);
         const orientationAngle = window.screen?.orientation?.angle ?? window.orientation ?? 0;
         const orient = THREE.MathUtils.degToRad(orientationAngle);
-        const euler = new THREE.Euler(beta, alpha, -gamma, 'YXZ');
-        const quaternion = new THREE.Quaternion().setFromEuler(euler);
-        const screenAdjust = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), -orient);
-        interiorOrientationRef.current.quaternion.copy(quaternion.multiply(screenAdjust));
+        euler.set(beta, alpha, -gamma, 'YXZ');
+        interiorOrientationRef.current.quaternion
+          .setFromEuler(euler)
+          .multiply(q1)
+          .multiply(q0.setFromAxisAngle(zee, -orient));
         interiorOrientationRef.current.active = true;
       };
 
