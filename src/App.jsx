@@ -175,9 +175,12 @@ export default function App() {
   const interiorRendererRef = useRef(null);
   const interiorSceneRef = useRef(null);
   const interiorCameraRef = useRef(null);
+  const interiorOrientationRef = useRef({ active: false, quaternion: new THREE.Quaternion(), cleanup: null });
   const interiorNetworkGroupRef = useRef(null);
   const miniNetworksRef = useRef([]);
   const interiorFrameIdRef = useRef(null);
+  const interiorFallbackViewRef = useRef({ yaw: 0, pitch: 0, dragging: false, lastX: 0, lastY: 0 });
+  const interiorAutoDriftRef = useRef(0);
 
   const focusedBubbleRef = useRef(null);
 
@@ -621,14 +624,17 @@ export default function App() {
     scene.background = new THREE.Color(0x050a16);
     interiorSceneRef.current = scene;
 
-    const camera = new THREE.PerspectiveCamera(70, 1, 0.1, 100);
-    camera.position.set(0, 0, 3.2);
+    const camera = new THREE.PerspectiveCamera(70, 1, 0.1, 1000);
+    camera.position.set(0, 0, 0);
     interiorCameraRef.current = camera;
 
     const renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     interiorContainerRef.current.appendChild(renderer.domElement);
     interiorRendererRef.current = renderer;
+    interiorOrientationRef.current = { active: false, quaternion: new THREE.Quaternion(), cleanup: null };
+    interiorFallbackViewRef.current = { yaw: 0, pitch: 0, dragging: false, lastX: 0, lastY: 0 };
+    interiorAutoDriftRef.current = 0;
 
     const updateSize = () => {
       const rect = interiorContainerRef.current?.getBoundingClientRect();
@@ -647,16 +653,34 @@ export default function App() {
     soft.position.set(2, 2, 2);
     scene.add(soft);
 
-    const dome = new THREE.Mesh(
-      new THREE.SphereGeometry(6, 52, 52),
-      new THREE.MeshStandardMaterial({
-        color: new THREE.Color(0x0b1a33),
-        emissive: new THREE.Color(focusedBubble.color).multiplyScalar(0.15),
-        roughness: 0.8,
-        metalness: 0.05,
-        side: THREE.BackSide,
-      }),
-    );
+    const domeMaterial = new THREE.MeshStandardMaterial({
+      color: new THREE.Color(0x0b1a33),
+      emissive: new THREE.Color(focusedBubble.color).multiplyScalar(0.15),
+      roughness: 0.85,
+      metalness: 0.05,
+      side: THREE.BackSide,
+    });
+    let domeTexture = null;
+    if (focusedBubble.skyboxUrl) {
+      const loader = new THREE.TextureLoader();
+      loader.load(
+        focusedBubble.skyboxUrl,
+        (texture) => {
+          texture.colorSpace = THREE.SRGBColorSpace;
+          texture.wrapS = THREE.RepeatWrapping;
+          texture.wrapT = THREE.RepeatWrapping;
+          domeMaterial.map = texture;
+          domeMaterial.needsUpdate = true;
+          domeTexture = texture;
+        },
+        undefined,
+        () => {
+          domeMaterial.color = new THREE.Color(0x0b1a33);
+        },
+      );
+    }
+
+    const dome = new THREE.Mesh(new THREE.SphereGeometry(16, 64, 64), domeMaterial);
     scene.add(dome);
 
     const networkGroup = new THREE.Group();
@@ -678,6 +702,76 @@ export default function App() {
     window.addEventListener('resize', updateSize);
     updateSize();
 
+    const maybeEnableGyro = async () => {
+      if (!('DeviceOrientationEvent' in window)) return;
+      const { DeviceOrientationEvent } = window;
+      const permissionRequest = DeviceOrientationEvent.requestPermission;
+      if (typeof permissionRequest === 'function') {
+        try {
+          const permission = await permissionRequest();
+          if (permission !== 'granted') return;
+        } catch (error) {
+          return;
+        }
+      }
+
+      const setQuaternionFromDevice = (event) => {
+        const alpha = THREE.MathUtils.degToRad(event.alpha || 0);
+        const beta = THREE.MathUtils.degToRad(event.beta || 0);
+        const gamma = THREE.MathUtils.degToRad(event.gamma || 0);
+        const orient = THREE.MathUtils.degToRad(window.orientation || 0);
+        const euler = new THREE.Euler(beta, alpha, -gamma, 'YXZ');
+        const quaternion = new THREE.Quaternion().setFromEuler(euler);
+        const screenAdjust = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), -orient);
+        interiorOrientationRef.current.quaternion.copy(quaternion.multiply(screenAdjust));
+        interiorOrientationRef.current.active = true;
+      };
+
+      window.addEventListener('deviceorientation', setQuaternionFromDevice, true);
+      interiorOrientationRef.current.cleanup = () => {
+        window.removeEventListener('deviceorientation', setQuaternionFromDevice, true);
+        interiorOrientationRef.current.active = false;
+      };
+      interiorAutoDriftRef.current = 0;
+    };
+
+    maybeEnableGyro();
+
+    const handlePointerDown = (event) => {
+      interiorFallbackViewRef.current = {
+        ...interiorFallbackViewRef.current,
+        dragging: true,
+        lastX: event.clientX,
+        lastY: event.clientY,
+      };
+    };
+
+    const handlePointerUp = () => {
+      interiorFallbackViewRef.current = {
+        ...interiorFallbackViewRef.current,
+        dragging: false,
+      };
+    };
+
+    const handlePointerMove = (event) => {
+      const view = interiorFallbackViewRef.current;
+      if (!view.dragging || interiorOrientationRef.current?.active) return;
+      const deltaX = event.clientX - view.lastX;
+      const deltaY = event.clientY - view.lastY;
+      interiorFallbackViewRef.current = {
+        ...view,
+        yaw: view.yaw - deltaX * 0.002,
+        pitch: Math.max(-Math.PI / 2 + 0.05, Math.min(Math.PI / 2 - 0.05, view.pitch - deltaY * 0.002)),
+        lastX: event.clientX,
+        lastY: event.clientY,
+      };
+    };
+
+    renderer.domElement.addEventListener('pointerdown', handlePointerDown);
+    renderer.domElement.addEventListener('pointerup', handlePointerUp);
+    renderer.domElement.addEventListener('pointerleave', handlePointerUp);
+    renderer.domElement.addEventListener('pointermove', handlePointerMove);
+
     const clock = new THREE.Clock();
     const animate = () => {
       const elapsed = clock.getElapsedTime();
@@ -692,6 +786,13 @@ export default function App() {
           if (child.lookAt) child.lookAt(camera.position);
         });
       });
+      if (interiorOrientationRef.current?.active) {
+        camera.quaternion.copy(interiorOrientationRef.current.quaternion);
+      } else {
+        interiorAutoDriftRef.current += 0.0006;
+        const { yaw, pitch } = interiorFallbackViewRef.current;
+        camera.rotation.set(pitch, yaw + interiorAutoDriftRef.current, 0, 'YXZ');
+      }
       dome.rotation.y += 0.0009;
       renderer.render(scene, camera);
       interiorFrameIdRef.current = requestAnimationFrame(animate);
@@ -699,9 +800,15 @@ export default function App() {
     animate();
 
     return () => {
+      renderer.domElement.removeEventListener('pointerdown', handlePointerDown);
+      renderer.domElement.removeEventListener('pointerup', handlePointerUp);
+      renderer.domElement.removeEventListener('pointerleave', handlePointerUp);
+      renderer.domElement.removeEventListener('pointermove', handlePointerMove);
       resizeObserver.disconnect();
       window.removeEventListener('resize', updateSize);
       if (interiorFrameIdRef.current) cancelAnimationFrame(interiorFrameIdRef.current);
+      if (interiorOrientationRef.current?.cleanup) interiorOrientationRef.current.cleanup();
+      interiorOrientationRef.current = { active: false, quaternion: new THREE.Quaternion(), cleanup: null };
       miniNetworksRef.current.forEach((network) => {
         network.children.forEach((child) => {
           if (child.material?.map) child.material.map.dispose();
@@ -710,6 +817,7 @@ export default function App() {
         });
       });
       miniNetworksRef.current = [];
+      if (domeTexture) domeTexture.dispose();
       dome.geometry.dispose();
       dome.material.dispose();
       renderer.dispose();
@@ -907,6 +1015,7 @@ export default function App() {
                   <p className="eyebrow">Intérieur</p>
                   <h3>{focusedBubble.title}</h3>
                 </div>
+                <span className="chip subtle">Caméra 360° · Gyro</span>
                 <button type="button" className="ghost" onClick={handleExitInterior}>Sortir</button>
               </div>
               <div className="tag-cloud" aria-label="Tags intégrés">
