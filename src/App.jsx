@@ -86,6 +86,15 @@ function createTextSprite(text, color = '#e8f7ff') {
   return sprite;
 }
 
+function ensureTags(content, fallbackTitle = '') {
+  const tokens = tokenizeText(content || '');
+  const titleTokens = tokenizeText(fallbackTitle || '');
+  const defaults = ['#bulle', '#réseau', '✨'];
+  if (tokens.length > 0) return tokens;
+  if (titleTokens.length > 0) return titleTokens;
+  return defaults;
+}
+
 function generateBubbles() {
   const count = poeticTitles.length;
   const goldenAngle = Math.PI * (3 - Math.sqrt(5));
@@ -106,7 +115,7 @@ function generateBubbles() {
       note: poeticTexts[index],
       skyboxUrl: '',
       fx: '',
-      seedTags: tokenizeText(poeticTexts[index]),
+      seedTags: ensureTags(poeticTexts[index], poeticTitles[index]),
       createdAt: Date.now() - 1000 * 60 * 20 - index * 1000,
       isRecent: false,
       connections: [],
@@ -215,7 +224,7 @@ export default function App() {
     const note = newBubbleData.note.trim();
     const skyboxUrl = newBubbleData.skyboxUrl.trim();
     const fx = newBubbleData.fx.trim();
-    const seedTags = tokenizeText(note);
+    const seedTags = ensureTags(note, title);
 
     setBubbles((prev) => {
       const nextIndex = prev.length + 1;
@@ -577,9 +586,7 @@ export default function App() {
     miniNetworksRef.current = [];
     syncTimeoutsRef.current = [];
 
-    const initialTags = (focusedBubble.seedTags && focusedBubble.seedTags.length > 0)
-      ? focusedBubble.seedTags
-      : tokenizeText(focusedBubble.note || '');
+    const initialTags = ensureTags(focusedBubble.note, focusedBubble.title);
 
     if (initialTags.length > 0) {
       const seedNetwork = createMiniNetwork(initialTags);
@@ -817,6 +824,11 @@ export default function App() {
                   de chaque synchro. Le texte brut est détruit après transmutation.
                 </p>
                 {focusedBubble.note && <p className="muted">{focusedBubble.note}</p>}
+                <div className="tag-cloud" aria-label="Tags initiaux de la bulle">
+                  {ensureTags(focusedBubble.note, focusedBubble.title).map((tag) => (
+                    <span key={tag} className="chip subtle">{tag}</span>
+                  ))}
+                </div>
                 <div className="bubble-meta">
                   <span className="chip">Skybox : {focusedBubble.skyboxUrl || 'à venir'}</span>
                   <span className="chip">FX : {focusedBubble.fx || 'silence'}</span>
@@ -828,7 +840,13 @@ export default function App() {
             </div>
 
             <div className="interior-body">
-              <div className="interior-viewport" ref={interiorContainerRef} />
+              <div className="viewport-panel">
+                <div className="panel-header">
+                  <p className="eyebrow">Mini réseau 3D</p>
+                  <p className="muted">Tags + émojis transmutés dans la bulle.</p>
+                </div>
+                <div className="interior-viewport" ref={interiorContainerRef} aria-label="Mini réseau three.js" />
+              </div>
               <form className="note-form" onSubmit={handleAddNote}>
                 <label htmlFor="note">Texte à semer</label>
                 <input

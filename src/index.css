@@ -259,12 +259,31 @@ button:active {
   align-items: stretch;
 }
 
+.viewport-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.panel-header {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
 .interior-viewport {
   min-height: 320px;
   border-radius: 14px;
   border: 1px solid rgba(255, 255, 255, 0.08);
   overflow: hidden;
   background: radial-gradient(circle at 30% 30%, rgba(0, 214, 255, 0.12), rgba(5, 10, 22, 0.9));
+}
+
+.tag-cloud {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 10px 0;
 }
 
 .note-form {
