@@ -217,7 +217,10 @@ export default function App() {
         sprite,
         velocity: new THREE.Vector3((Math.random() - 0.5) * 0.018, (Math.random() - 0.5) * 0.014, (Math.random() - 0.5) * 0.018),
         wander: Math.random() * Math.PI * 2 + index,
+        bounceLimit: 10 + Math.floor(Math.random() * 21),
         bounces: 0,
+        lastBounceId: null,
+        orbitPhase: Math.random() * Math.PI * 2,
       });
     });
     logEvent(`Ensemencement (${uniqueTags.join(' ')}) libéré dans le réseau.`);
@@ -469,6 +472,13 @@ export default function App() {
         seed.velocity.y += (Math.random() - 0.5) * wanderStrength * 0.2;
         seed.velocity.z += (Math.random() - 0.5) * wanderStrength * 0.2;
 
+        const orbitPush = new THREE.Vector3(
+          Math.sin(elapsed * 0.35 + seed.orbitPhase),
+          Math.sin(elapsed * 0.2 + seed.orbitPhase * 1.6) * 0.4,
+          Math.cos(elapsed * 0.35 + seed.orbitPhase),
+        ).multiplyScalar(0.0032);
+        seed.velocity.add(orbitPush);
+
         if (nearest) {
           const direction = new THREE.Vector3().subVectors(nearest.position, seed.sprite.position);
           const distance = Math.max(direction.length(), 0.001);
@@ -477,14 +487,18 @@ export default function App() {
           seed.velocity.addScaledVector(direction, pull);
 
           if (distance < 1.1) {
-            if (seed.bounces < 3) {
-              const normal = new THREE.Vector3().subVectors(seed.sprite.position, nearest.position).normalize();
+            const normal = new THREE.Vector3().subVectors(seed.sprite.position, nearest.position).normalize();
+            const hasNewBounce = nearest.userData.meta.id !== seed.lastBounceId;
+            if (seed.bounces < seed.bounceLimit && hasNewBounce) {
               const reflected = seed.velocity.clone().sub(normal.clone().multiplyScalar(2 * seed.velocity.dot(normal)));
               seed.velocity.copy(reflected.multiplyScalar(0.85));
               seed.velocity.addScaledVector(normal, 0.02);
+              seed.lastBounceId = nearest.userData.meta.id;
               seed.bounces += 1;
-            } else {
+            } else if (seed.bounces >= seed.bounceLimit) {
               pendingIntegrations.push({ bubbleId: nearest.userData.meta.id, tag: seed.sprite.userData.tag, sprite: seed.sprite });
+            } else {
+              seed.velocity.addScaledVector(normal, 0.012);
             }
           }
         }
