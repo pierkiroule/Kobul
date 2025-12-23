@@ -163,7 +163,7 @@ function buildProceduralSky(accentColor, random) {
 
   const texture = new THREE.CanvasTexture(canvas);
   texture.colorSpace = THREE.SRGBColorSpace;
-  texture.wrapS = THREE.MirroredRepeatWrapping;
+  texture.wrapS = THREE.ClampToEdgeWrapping;
   texture.wrapT = THREE.ClampToEdgeWrapping;
   texture.needsUpdate = true;
 
@@ -244,6 +244,76 @@ function buildLandscape(accentColor, random) {
       });
     },
   };
+}
+
+function buildBubblePattern(accentColor, seed) {
+  const canvas = document.createElement('canvas');
+  canvas.width = 512;
+  canvas.height = 512;
+  const ctx = canvas.getContext('2d');
+  const random = createSeededRandom(seed);
+
+  const base = new THREE.Color(accentColor);
+  const dark = base.clone().lerp(new THREE.Color(0x030710), 0.65).getStyle();
+  const mid = base.clone().lerp(new THREE.Color(0xffffff), 0.16).getStyle();
+  const glow = base.clone().lerp(new THREE.Color(0xffffff), 0.4).getStyle();
+
+  const radial = ctx.createRadialGradient(256, 256, 60, 256, 256, 320);
+  radial.addColorStop(0, glow);
+  radial.addColorStop(0.45, mid);
+  radial.addColorStop(1, dark);
+  ctx.fillStyle = radial;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  ctx.globalAlpha = 0.2;
+  for (let i = 0; i < 16; i += 1) {
+    const bandOffset = random() * Math.PI * 2;
+    const bandThickness = 14 + random() * 28;
+    ctx.beginPath();
+    for (let x = 0; x <= canvas.width; x += 4) {
+      const t = (x / canvas.width) * Math.PI * 2 + bandOffset;
+      const y = canvas.height / 2 + Math.sin(t * (1.2 + random() * 0.4)) * (bandThickness * 2);
+      ctx.lineTo(x, y + Math.cos(t * 2) * bandThickness * 0.3);
+    }
+    ctx.strokeStyle = base.clone().offsetHSL(0.02, 0.05, 0.08).getStyle();
+    ctx.lineWidth = bandThickness * 0.5;
+    ctx.stroke();
+  }
+
+  ctx.globalAlpha = 0.65;
+  for (let i = 0; i < 90; i += 1) {
+    const radius = 6 + random() * 18;
+    const x = random() * canvas.width;
+    const y = random() * canvas.height;
+    const gradient = ctx.createRadialGradient(x, y, 0, x, y, radius);
+    gradient.addColorStop(0, glow);
+    gradient.addColorStop(1, 'transparent');
+    ctx.fillStyle = gradient;
+    ctx.beginPath();
+    ctx.arc(x, y, radius, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  ctx.globalAlpha = 1;
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.18)';
+  ctx.lineWidth = 1.4;
+  for (let i = 0; i < 5; i += 1) {
+    const rx = canvas.width * (0.22 + random() * 0.56);
+    const ry = canvas.height * (0.22 + random() * 0.56);
+    const cx = canvas.width * (0.2 + random() * 0.6);
+    const cy = canvas.height * (0.2 + random() * 0.6);
+    ctx.beginPath();
+    ctx.ellipse(cx, cy, rx, ry, random() * Math.PI, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.RepeatWrapping;
+  texture.repeat.set(1, 1);
+  texture.needsUpdate = true;
+  return texture;
 }
 
 function ensureTags(content, fallbackTitle = '') {
@@ -540,16 +610,14 @@ export default function App() {
     bubbleTagGroupsRef.current = new Map();
 
     bubbles.forEach((bubble) => {
-      const material = new THREE.MeshPhysicalMaterial({
-        color: bubble.color,
-        roughness: 0.2,
-        metalness: 0.08,
-        transmission: 0.78,
-        thickness: 0.9,
-        clearcoat: 1,
-        clearcoatRoughness: 0.05,
-        emissive: bubble.color,
-        emissiveIntensity: 0.15,
+      const pattern = buildBubblePattern(bubble.color, `${bubble.id}-${bubble.createdAt}`);
+      const material = new THREE.MeshStandardMaterial({
+        color: new THREE.Color(bubble.color).lerp(new THREE.Color(0x0b1525), 0.12),
+        map: pattern,
+        emissive: new THREE.Color(bubble.color).multiplyScalar(0.18),
+        emissiveMap: pattern,
+        roughness: 0.42,
+        metalness: 0.12,
       });
       const mesh = new THREE.Mesh(geometry, material);
       mesh.position.copy(bubble.position);
@@ -872,7 +940,13 @@ export default function App() {
         });
       });
       bubbleTagGroupsRef.current = new Map();
-      atoms.forEach((atom) => atom.material.dispose());
+      atoms.forEach((atom) => {
+        if (atom.material?.map) atom.material.map.dispose();
+        if (atom.material?.emissiveMap && atom.material.emissiveMap !== atom.material.map) {
+          atom.material.emissiveMap.dispose();
+        }
+        atom.material.dispose();
+      });
       renderer.dispose();
       if (sceneContainerRef.current?.contains(renderer.domElement)) {
         sceneContainerRef.current.removeChild(renderer.domElement);
@@ -957,21 +1031,30 @@ export default function App() {
         }
       }
 
-      const setQuaternionFromDevice = (event) => {
+      const zee = new THREE.Vector3(0, 0, 1);
+      const euler = new THREE.Euler();
+      const q0 = new THREE.Quaternion();
+      const q1 = new THREE.Quaternion(-Math.sqrt(0.5), 0, 0, Math.sqrt(0.5));
+      const targetQuaternion = new THREE.Quaternion();
+
+      const handleOrientation = (event) => {
         const alpha = THREE.MathUtils.degToRad(event.alpha || 0);
         const beta = THREE.MathUtils.degToRad(event.beta || 0);
         const gamma = THREE.MathUtils.degToRad(event.gamma || 0);
-        const orient = THREE.MathUtils.degToRad(window.orientation || 0);
-        const euler = new THREE.Euler(beta, alpha, -gamma, 'YXZ');
-        const quaternion = new THREE.Quaternion().setFromEuler(euler);
-        const screenAdjust = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), -orient);
-        interiorOrientationRef.current.quaternion.copy(quaternion.multiply(screenAdjust));
+        const orientationAngle = window.screen?.orientation?.angle ?? window.orientation ?? 0;
+        const orient = THREE.MathUtils.degToRad(orientationAngle);
+        euler.set(beta, alpha, -gamma, 'YXZ');
+        targetQuaternion
+          .setFromEuler(euler)
+          .multiply(q1)
+          .multiply(q0.setFromAxisAngle(zee, -orient));
+        interiorOrientationRef.current.quaternion.slerp(targetQuaternion, 0.25);
         interiorOrientationRef.current.active = true;
       };
 
-      window.addEventListener('deviceorientation', setQuaternionFromDevice, true);
+      window.addEventListener('deviceorientation', handleOrientation, true);
       interiorOrientationRef.current.cleanup = () => {
-        window.removeEventListener('deviceorientation', setQuaternionFromDevice, true);
+        window.removeEventListener('deviceorientation', handleOrientation, true);
         interiorOrientationRef.current.active = false;
       };
       interiorAutoDriftRef.current = 0;
@@ -1029,13 +1112,16 @@ export default function App() {
         });
       });
       if (interiorOrientationRef.current?.active) {
-        camera.quaternion.copy(interiorOrientationRef.current.quaternion);
+        camera.quaternion.slerp(interiorOrientationRef.current.quaternion, 0.35);
+        sky.mesh.position.copy(camera.position);
+        sky.mesh.rotation.set(0, 0, 0);
       } else {
         interiorAutoDriftRef.current += 0.0006;
         const { yaw, pitch } = interiorFallbackViewRef.current;
         camera.rotation.set(pitch, yaw + interiorAutoDriftRef.current, 0, 'YXZ');
+        sky.mesh.position.copy(camera.position);
+        sky.mesh.rotation.set(0, 0, 0);
       }
-      sky.mesh.rotation.y += 0.0006;
       landscape.scatterGroup.rotation.y += 0.0004;
       landscape.scatterGroup.children.forEach((shape, idx) => {
         shape.rotation.x += 0.001 + idx * 0.0002;
@@ -1217,26 +1303,50 @@ export default function App() {
       </aside>
 
       <main className="stage">
-        <div className="scene" aria-label="Réseau de bulles 3D">
-          <div ref={sceneContainerRef} className="experience" />
-          {isInteriorOpen && focusedBubble && (
-            <div className="interior-window" role="region" aria-label="Intérieur de la bulle">
-              <div className="interior-window-header">
-                <div>
-                  <p className="eyebrow">Intérieur</p>
-                  <h3>{focusedBubble.title}</h3>
-                </div>
-                <span className="chip subtle">Caméra 360° · Gyro</span>
-                <button type="button" className="ghost" onClick={handleExitInterior}>Sortir</button>
+        <div className="scene" aria-label="Réseau de bulles 3D et intérieur">
+          <section className="scene-panel network-panel" aria-label="Réseau de bulles 3D">
+            <div className="panel-header">
+              <div>
+                <p className="eyebrow">Réseau</p>
+                <h3>Constellation vivante</h3>
               </div>
-              <div className="tag-cloud" aria-label="Tags intégrés">
-                {(focusedBubble.seedTags || ensureTags(focusedBubble.note, focusedBubble.title)).map((tag) => (
-                  <span key={tag} className="chip subtle">{tag}</span>
-                ))}
+              <div className="panel-actions">
+                <button type="button" className="ghost" onClick={resetView}>Recentrer</button>
+                <button type="button" className="ghost" onClick={handleExitInterior} disabled={!focusedBubble}>
+                  Sortir d'une bulle
+                </button>
               </div>
-              <div className="interior-viewport" ref={interiorContainerRef} aria-label="Micro réseau" />
             </div>
-          )}
+            <div ref={sceneContainerRef} className="experience" />
+          </section>
+
+          <section className="scene-panel interior-panel" aria-label="Intérieur de la bulle">
+            <div className="panel-header">
+              <div>
+                <p className="eyebrow">Intérieur</p>
+                <h3>{focusedBubble ? focusedBubble.title : 'Choisissez une bulle'}</h3>
+              </div>
+              {focusedBubble && (
+                <div className="panel-actions">
+                  <span className="chip subtle">Caméra 360° · Gyro</span>
+                  <button type="button" className="ghost" onClick={handleExitInterior}>Sortir</button>
+                </div>
+              )}
+            </div>
+
+            {isInteriorOpen && focusedBubble ? (
+              <>
+                <div className="tag-cloud" aria-label="Tags intégrés">
+                  {(focusedBubble.seedTags || ensureTags(focusedBubble.note, focusedBubble.title)).map((tag) => (
+                    <span key={tag} className="chip subtle">{tag}</span>
+                  ))}
+                </div>
+                <div className="interior-viewport" ref={interiorContainerRef} aria-label="Micro réseau" />
+              </>
+            ) : (
+              <p className="muted">Entrer dans une bulle pour ouvrir la vue panoramique 360° dédiée.</p>
+            )}
+          </section>
         </div>
       </main>
     </div>
