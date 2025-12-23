@@ -215,7 +215,7 @@ export default function App() {
 
       seedParticlesRef.current.push({
         sprite,
-        velocity: new THREE.Vector3((Math.random() - 0.5) * 0.018, (Math.random() - 0.5) * 0.014, (Math.random() - 0.5) * 0.018),
+        velocity: new THREE.Vector3((Math.random() - 0.5) * 0.011, (Math.random() - 0.5) * 0.009, (Math.random() - 0.5) * 0.011),
         wander: Math.random() * Math.PI * 2 + index,
         bounceLimit: 10 + Math.floor(Math.random() * 21),
         bounces: 0,
@@ -467,23 +467,29 @@ export default function App() {
           }
         });
 
-        const wanderStrength = 0.004 + Math.sin(elapsed + seed.wander) * 0.002;
+        const wanderStrength = 0.0025 + Math.sin(elapsed + seed.wander) * 0.0012;
         seed.velocity.x += (Math.random() - 0.5) * wanderStrength * 0.2;
         seed.velocity.y += (Math.random() - 0.5) * wanderStrength * 0.2;
         seed.velocity.z += (Math.random() - 0.5) * wanderStrength * 0.2;
 
         const orbitPush = new THREE.Vector3(
-          Math.sin(elapsed * 0.35 + seed.orbitPhase),
-          Math.sin(elapsed * 0.2 + seed.orbitPhase * 1.6) * 0.4,
-          Math.cos(elapsed * 0.35 + seed.orbitPhase),
-        ).multiplyScalar(0.0032);
+          Math.sin(elapsed * 0.3 + seed.orbitPhase),
+          Math.sin(elapsed * 0.18 + seed.orbitPhase * 1.4) * 0.36,
+          Math.cos(elapsed * 0.3 + seed.orbitPhase),
+        ).multiplyScalar(0.0016);
         seed.velocity.add(orbitPush);
+
+        const coreVector = seed.sprite.position.clone().multiplyScalar(-1);
+        const coreDistance = Math.max(coreVector.length(), 0.001);
+        coreVector.normalize();
+        const corePull = Math.min(coreDistance / 18, 1) * 0.008;
+        seed.velocity.addScaledVector(coreVector, corePull);
 
         if (nearest) {
           const direction = new THREE.Vector3().subVectors(nearest.position, seed.sprite.position);
           const distance = Math.max(direction.length(), 0.001);
           direction.normalize();
-          const pull = 0.006 / distance;
+          const pull = 0.01 / distance;
           seed.velocity.addScaledVector(direction, pull);
 
           if (distance < 1.1) {
@@ -503,7 +509,13 @@ export default function App() {
           }
         }
 
-        seed.velocity.multiplyScalar(0.992);
+        const maxSpeed = 0.024;
+        const speed = seed.velocity.length();
+        if (speed > maxSpeed) {
+          seed.velocity.multiplyScalar(maxSpeed / speed);
+        }
+
+        seed.velocity.multiplyScalar(0.989);
         seed.sprite.position.add(seed.velocity);
         seed.sprite.lookAt(camera.position);
       });
