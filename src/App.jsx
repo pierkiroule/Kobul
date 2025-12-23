@@ -961,24 +961,26 @@ export default function App() {
       const euler = new THREE.Euler();
       const q0 = new THREE.Quaternion();
       const q1 = new THREE.Quaternion(-Math.sqrt(0.5), 0, 0, Math.sqrt(0.5));
+      const targetQuaternion = new THREE.Quaternion();
 
-      const setQuaternionFromDevice = (event) => {
+      const handleOrientation = (event) => {
         const alpha = THREE.MathUtils.degToRad(event.alpha || 0);
         const beta = THREE.MathUtils.degToRad(event.beta || 0);
         const gamma = THREE.MathUtils.degToRad(event.gamma || 0);
         const orientationAngle = window.screen?.orientation?.angle ?? window.orientation ?? 0;
         const orient = THREE.MathUtils.degToRad(orientationAngle);
         euler.set(beta, alpha, -gamma, 'YXZ');
-        interiorOrientationRef.current.quaternion
+        targetQuaternion
           .setFromEuler(euler)
           .multiply(q1)
           .multiply(q0.setFromAxisAngle(zee, -orient));
+        interiorOrientationRef.current.quaternion.slerp(targetQuaternion, 0.25);
         interiorOrientationRef.current.active = true;
       };
 
-      window.addEventListener('deviceorientation', setQuaternionFromDevice, true);
+      window.addEventListener('deviceorientation', handleOrientation, true);
       interiorOrientationRef.current.cleanup = () => {
-        window.removeEventListener('deviceorientation', setQuaternionFromDevice, true);
+        window.removeEventListener('deviceorientation', handleOrientation, true);
         interiorOrientationRef.current.active = false;
       };
       interiorAutoDriftRef.current = 0;
@@ -1036,7 +1038,7 @@ export default function App() {
         });
       });
       if (interiorOrientationRef.current?.active) {
-        camera.quaternion.copy(interiorOrientationRef.current.quaternion);
+        camera.quaternion.slerp(interiorOrientationRef.current.quaternion, 0.35);
         sky.mesh.position.copy(camera.position);
         sky.mesh.rotation.set(0, 0, 0);
       } else {
