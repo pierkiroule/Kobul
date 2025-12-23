@@ -163,7 +163,7 @@ function buildProceduralSky(accentColor, random) {
 
   const texture = new THREE.CanvasTexture(canvas);
   texture.colorSpace = THREE.SRGBColorSpace;
-  texture.wrapS = THREE.MirroredRepeatWrapping;
+  texture.wrapS = THREE.ClampToEdgeWrapping;
   texture.wrapT = THREE.ClampToEdgeWrapping;
   texture.needsUpdate = true;
 
@@ -961,7 +961,8 @@ export default function App() {
         const alpha = THREE.MathUtils.degToRad(event.alpha || 0);
         const beta = THREE.MathUtils.degToRad(event.beta || 0);
         const gamma = THREE.MathUtils.degToRad(event.gamma || 0);
-        const orient = THREE.MathUtils.degToRad(window.orientation || 0);
+        const orientationAngle = window.screen?.orientation?.angle ?? window.orientation ?? 0;
+        const orient = THREE.MathUtils.degToRad(orientationAngle);
         const euler = new THREE.Euler(beta, alpha, -gamma, 'YXZ');
         const quaternion = new THREE.Quaternion().setFromEuler(euler);
         const screenAdjust = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), -orient);
@@ -1030,12 +1031,15 @@ export default function App() {
       });
       if (interiorOrientationRef.current?.active) {
         camera.quaternion.copy(interiorOrientationRef.current.quaternion);
+        sky.mesh.position.copy(camera.position);
+        sky.mesh.rotation.set(0, 0, 0);
       } else {
         interiorAutoDriftRef.current += 0.0006;
         const { yaw, pitch } = interiorFallbackViewRef.current;
         camera.rotation.set(pitch, yaw + interiorAutoDriftRef.current, 0, 'YXZ');
+        sky.mesh.position.copy(camera.position);
+        sky.mesh.rotation.set(0, 0, 0);
       }
-      sky.mesh.rotation.y += 0.0006;
       landscape.scatterGroup.rotation.y += 0.0004;
       landscape.scatterGroup.children.forEach((shape, idx) => {
         shape.rotation.x += 0.001 + idx * 0.0002;
