@@ -1,7 +1,9 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import gsap from 'gsap';
+
+const palette = [0x7cf7ff, 0xff7bd9, 0xffd170, 0x7bffbf, 0xb7a7ff];
 
 function createTextSprite(text, color = '#e8f7ff') {
   const canvas = document.createElement('canvas');
@@ -42,6 +44,47 @@ function createTextSprite(text, color = '#e8f7ff') {
   return sprite;
 }
 
+function generateBubbles() {
+  const count = 18;
+  const goldenAngle = Math.PI * (3 - Math.sqrt(5));
+  return Array.from({ length: count }, (_, index) => {
+    const theta = goldenAngle * index;
+    const y = 1 - (index / (count - 1)) * 2;
+    const radius = Math.sqrt(1 - y * y);
+    const spread = 12.5;
+    const position = new THREE.Vector3(
+      Math.cos(theta) * radius * spread,
+      y * spread * 0.6,
+      Math.sin(theta) * radius * spread,
+    );
+
+    return {
+      id: `bulle-${index + 1}`,
+      title: `Bulle ${index + 1}`,
+      color: palette[index % palette.length],
+      position,
+    };
+  });
+}
+
+function tokenizeText(input) {
+  const cleaned = input.trim();
+  if (!cleaned) return [];
+
+  const emojiMatches = cleaned.match(/[\p{Emoji}\u2600-\u27BF]/gu) || [];
+  const words = cleaned
+    .replace(/[\p{Emoji}\u2600-\u27BF]/gu, '')
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((word) => `#${word.toLowerCase()}`);
+
+  return [...words, ...emojiMatches];
+}
+
+function uniqueId() {
+  return crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
 export default function App() {
   const sceneContainerRef = useRef(null);
   const interiorContainerRef = useRef(null);
@@ -56,39 +99,25 @@ export default function App() {
   const interiorRendererRef = useRef(null);
   const interiorSceneRef = useRef(null);
   const interiorCameraRef = useRef(null);
-  const interiorNotesGroupRef = useRef(null);
+  const interiorNetworkGroupRef = useRef(null);
+  const miniNetworksRef = useRef([]);
+  const syncTimeoutsRef = useRef([]);
   const interiorFrameIdRef = useRef(null);
+
+  const focusedBubbleRef = useRef(null);
+
+  const [bubbles, setBubbles] = useState(generateBubbles);
 
   const [focusedBubble, setFocusedBubble] = useState(null);
   const [showEntryPrompt, setShowEntryPrompt] = useState(false);
   const [isInteriorOpen, setIsInteriorOpen] = useState(false);
   const [newNote, setNewNote] = useState('');
-  const [notesByBubble, setNotesByBubble] = useState({});
 
-  const palette = [0x7cf7ff, 0xff7bd9, 0xffd170, 0x7bffbf, 0xb7a7ff];
+  const [syncEvents, setSyncEvents] = useState([]);
 
-  const bubbles = useMemo(() => {
-    const count = 18;
-    const goldenAngle = Math.PI * (3 - Math.sqrt(5));
-    return Array.from({ length: count }, (_, index) => {
-      const theta = goldenAngle * index;
-      const y = 1 - (index / (count - 1)) * 2;
-      const radius = Math.sqrt(1 - y * y);
-      const spread = 12.5;
-      const position = new THREE.Vector3(
-        Math.cos(theta) * radius * spread,
-        y * spread * 0.6,
-        Math.sin(theta) * radius * spread,
-      );
-
-      return {
-        id: `bulle-${index + 1}`,
-        title: `Bulle ${index + 1}`,
-        color: palette[index % palette.length],
-        position,
-      };
-    });
-  }, []);
+  useEffect(() => {
+    focusedBubbleRef.current = focusedBubble;
+  }, [focusedBubble]);
 
   const resetView = () => {
     if (!cameraRef.current || !controlsRef.current) return;
@@ -96,6 +125,31 @@ export default function App() {
     gsap.to(controlsRef.current.target, { x: 0, y: 0, z: 0, duration: 1.2, ease: 'power2.inOut' });
     setFocusedBubble(null);
     setShowEntryPrompt(false);
+    focusedBubbleRef.current = null;
+  };
+
+  const handleAddBubble = () => {
+    const angle = Math.random() * Math.PI * 2;
+    const radius = 9 + Math.random() * 6;
+    const height = (Math.random() - 0.5) * 6;
+    const position = new THREE.Vector3(
+      Math.cos(angle) * radius,
+      height,
+      Math.sin(angle) * radius,
+    );
+
+    setBubbles((prev) => {
+      const nextIndex = prev.length + 1;
+      return [
+        ...prev,
+        {
+          id: `bulle-${nextIndex}`,
+          title: `Bulle ${nextIndex}`,
+          color: palette[nextIndex % palette.length],
+          position,
+        },
+      ];
+    });
   };
 
   const focusBubble = (mesh) => {
@@ -103,6 +157,7 @@ export default function App() {
     const meta = mesh.userData.meta;
     setFocusedBubble(meta);
     setShowEntryPrompt(true);
+    focusedBubbleRef.current = meta;
 
     gsap.to(cameraRef.current.position, {
       x: mesh.position.x + 2.2,
@@ -205,10 +260,12 @@ export default function App() {
 
     const lineMaterial = new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.18 });
     const linkPositions = [];
-    bubbles.forEach((source, idx) => {
+    const linkThreshold = 11;
+    bubbles.forEach((source) => {
       const neighbors = [...bubbles]
         .filter((candidate) => candidate.id !== source.id)
         .map((candidate) => ({ candidate, distance: source.position.distanceTo(candidate.position) }))
+        .filter(({ distance }) => distance <= linkThreshold)
         .sort((a, b) => a.distance - b.distance)
         .slice(0, 3);
       neighbors.forEach(({ candidate }) => {
@@ -223,7 +280,9 @@ export default function App() {
       });
     });
     const lineGeom = new THREE.BufferGeometry();
-    lineGeom.setAttribute('position', new THREE.Float32BufferAttribute(linkPositions, 3));
+    if (linkPositions.length > 0) {
+      lineGeom.setAttribute('position', new THREE.Float32BufferAttribute(linkPositions, 3));
+    }
     const links = new THREE.LineSegments(lineGeom, lineMaterial);
     links.frustumCulled = false;
     scene.add(links);
@@ -267,8 +326,9 @@ export default function App() {
         mat.emissiveIntensity = 0.16 + Math.abs(Math.sin(elapsed * 1 + offset)) * 0.25;
       });
 
-      if (haloRef.current && focusedBubble) {
-        const target = atoms.find((mesh) => mesh.userData.meta.id === focusedBubble.id);
+      const targetBubble = focusedBubbleRef.current;
+      if (haloRef.current && targetBubble) {
+        const target = atoms.find((mesh) => mesh.userData.meta.id === targetBubble.id);
         if (target) {
           halo.visible = true;
           halo.position.copy(target.position);
@@ -305,7 +365,7 @@ export default function App() {
       cameraRef.current = null;
       controlsRef.current = null;
     };
-  }, [bubbles, focusedBubble]);
+  }, [bubbles]);
 
   useEffect(() => {
     if (!isInteriorOpen || !interiorContainerRef.current || !focusedBubble) return undefined;
@@ -352,16 +412,11 @@ export default function App() {
     );
     scene.add(dome);
 
-    const noteGroup = new THREE.Group();
-    scene.add(noteGroup);
-    interiorNotesGroupRef.current = noteGroup;
-
-    const seedNotes = notesByBubble[focusedBubble.id] || [];
-    seedNotes.forEach((note) => {
-      const sprite = createTextSprite(note.text, '#f5fbff');
-      sprite.position.set(note.position[0], note.position[1], note.position[2]);
-      noteGroup.add(sprite);
-    });
+    const networkGroup = new THREE.Group();
+    scene.add(networkGroup);
+    interiorNetworkGroupRef.current = networkGroup;
+    miniNetworksRef.current = [];
+    syncTimeoutsRef.current = [];
 
     const resizeObserver = new ResizeObserver(updateSize);
     resizeObserver.observe(interiorContainerRef.current);
@@ -371,9 +426,16 @@ export default function App() {
     const clock = new THREE.Clock();
     const animate = () => {
       const elapsed = clock.getElapsedTime();
-      noteGroup.children.forEach((child, index) => {
-        child.position.y += Math.sin(elapsed * 1.4 + index) * 0.002;
-        child.lookAt(camera.position);
+      miniNetworksRef.current.forEach((network, idx) => {
+        network.rotation.y += 0.0008 + idx * 0.0002;
+        network.children.forEach((child) => {
+          if (child.userData.base) {
+            child.position.x = child.userData.base.x + Math.sin(elapsed * 0.9 + child.userData.offset) * 0.22;
+            child.position.y = child.userData.base.y + Math.cos(elapsed * 0.8 + child.userData.offset * 1.2) * 0.18;
+            child.position.z = child.userData.base.z + Math.sin(elapsed * 0.7 + child.userData.offset * 0.7) * 0.2;
+          }
+          if (child.lookAt) child.lookAt(camera.position);
+        });
       });
       dome.rotation.y += 0.0009;
       renderer.render(scene, camera);
@@ -385,10 +447,16 @@ export default function App() {
       resizeObserver.disconnect();
       window.removeEventListener('resize', updateSize);
       if (interiorFrameIdRef.current) cancelAnimationFrame(interiorFrameIdRef.current);
-      noteGroup.children.forEach((child) => {
-        if (child.material?.map) child.material.map.dispose();
-        if (child.material) child.material.dispose();
+      miniNetworksRef.current.forEach((network) => {
+        network.children.forEach((child) => {
+          if (child.material?.map) child.material.map.dispose();
+          if (child.material) child.material.dispose();
+          if (child.geometry) child.geometry.dispose();
+        });
       });
+      miniNetworksRef.current = [];
+      syncTimeoutsRef.current.forEach((id) => clearTimeout(id));
+      syncTimeoutsRef.current = [];
       dome.geometry.dispose();
       dome.material.dispose();
       renderer.dispose();
@@ -398,14 +466,15 @@ export default function App() {
       interiorSceneRef.current = null;
       interiorRendererRef.current = null;
       interiorCameraRef.current = null;
-      interiorNotesGroupRef.current = null;
+      interiorNetworkGroupRef.current = null;
     };
-  }, [focusedBubble, isInteriorOpen, notesByBubble]);
+  }, [focusedBubble, isInteriorOpen]);
 
   const handleEnter = () => {
     if (!focusedBubble) return;
     setIsInteriorOpen(true);
     setShowEntryPrompt(false);
+    setSyncEvents([]);
   };
 
   const handleExitInterior = () => {
@@ -414,56 +483,119 @@ export default function App() {
     resetView();
   };
 
+  const discardNetwork = (group) => {
+    if (!group) return;
+    miniNetworksRef.current = miniNetworksRef.current.filter((net) => net !== group);
+    group.children.forEach((child) => {
+      if (child.material?.map) child.material.map.dispose();
+      if (child.material) child.material.dispose();
+      if (child.geometry) child.geometry.dispose();
+    });
+    if (interiorNetworkGroupRef.current) {
+      interiorNetworkGroupRef.current.remove(group);
+    }
+  };
+
+  const logSync = (message) => {
+    setSyncEvents((prev) => {
+      const next = [{ id: uniqueId(), message }, ...prev];
+      return next.slice(0, 4);
+    });
+  };
+
+  const createMiniNetwork = (tags) => {
+    if (!interiorNetworkGroupRef.current) return null;
+    const group = new THREE.Group();
+
+    const core = new THREE.Mesh(
+      new THREE.SphereGeometry(0.2, 22, 22),
+      new THREE.MeshStandardMaterial({
+        color: 0xffffff,
+        emissive: focusedBubble?.color || 0xffffff,
+        emissiveIntensity: 0.3,
+        roughness: 0.35,
+      }),
+    );
+    core.userData.base = new THREE.Vector3(0, 0, 0);
+    core.userData.offset = Math.random() * 3;
+    group.add(core);
+
+    const lines = [];
+    const radius = 1 + Math.random() * 0.4;
+    tags.forEach((tag, index) => {
+      const phi = Math.acos(1 - (2 * (index + 0.5)) / (tags.length + 1));
+      const theta = Math.PI * (1 + Math.sqrt(5)) * index;
+      const position = new THREE.Vector3(
+        Math.cos(theta) * Math.sin(phi) * radius,
+        Math.cos(phi) * radius,
+        Math.sin(theta) * Math.sin(phi) * radius,
+      );
+
+      const node = createTextSprite(tag, '#f5fbff');
+      node.position.copy(position);
+      node.userData.base = position.clone();
+      node.userData.offset = Math.random() * 2;
+      group.add(node);
+
+      lines.push(0, 0, 0, position.x, position.y, position.z);
+    });
+
+    if (lines.length > 0) {
+      const lineGeom = new THREE.BufferGeometry();
+      lineGeom.setAttribute('position', new THREE.Float32BufferAttribute(lines, 3));
+      const lineMat = new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.3 });
+      const lineSegments = new THREE.LineSegments(lineGeom, lineMat);
+      lineSegments.userData.base = new THREE.Vector3(0, 0, 0);
+      lineSegments.userData.offset = Math.random() * 2;
+      group.add(lineSegments);
+    }
+
+    interiorNetworkGroupRef.current.add(group);
+    miniNetworksRef.current.push(group);
+    return group;
+  };
+
   const handleAddNote = (event) => {
     event.preventDefault();
     if (!focusedBubble) return;
     const trimmed = newNote.trim();
     if (!trimmed) return;
 
-    const direction = new THREE.Vector3(Math.random() * 2 - 1, Math.random() * 2 - 1, Math.random() * 2 - 1).normalize();
-    const radius = 1.8 + Math.random() * 0.8;
-    const position = direction.multiplyScalar(radius);
+    const tags = tokenizeText(trimmed);
+    if (tags.length === 0) return;
 
-    setNotesByBubble((prev) => {
-      const existing = prev[focusedBubble.id] || [];
-      return {
-        ...prev,
-        [focusedBubble.id]: [...existing, { id: `${focusedBubble.id}-${existing.length + 1}`, text: trimmed, position: [position.x, position.y, position.z] }],
-      };
-    });
+    const group = createMiniNetwork(tags);
     setNewNote('');
-  };
 
-  useEffect(() => {
-    if (!isInteriorOpen || !interiorNotesGroupRef.current || !focusedBubble) return;
-    const group = interiorNotesGroupRef.current;
-    while (group.children.length) {
-      const child = group.children.pop();
-      if (child.material?.map) child.material.map.dispose();
-      if (child.material) child.material.dispose();
+    if (group) {
+      const timeout = setTimeout(() => {
+        logSync(`Réseau (${tags.join(' ')}) envoyé et recyclé.`);
+        discardNetwork(group);
+      }, 4200);
+      syncTimeoutsRef.current.push(timeout);
     }
-    const notes = notesByBubble[focusedBubble.id] || [];
-    notes.forEach((note) => {
-      const sprite = createTextSprite(note.text, '#f5fbff');
-      sprite.position.set(note.position[0], note.position[1], note.position[2]);
-      group.add(sprite);
-    });
-  }, [notesByBubble, isInteriorOpen, focusedBubble]);
+  };
 
   return (
     <div className="layout">
       <header className="hero">
         <div>
           <p className="eyebrow">EchoBulle</p>
-          <h1>Réseau de bulles à explorer lentement</h1>
+          <h1>Réseau de bulles transmedia à explorer lentement</h1>
           <p className="lede">
-            Choisissez une bulle, voyagez doucement vers elle, puis entrez pour y planter vos mots.
-            À tout moment, revenez au réseau vivant.
+            Ouvrez la scène, observez les bulles et leurs liens lumineux. Entrez dans l\'une d\'elles pour
+            semer un texte : il sera transmuté en tags et émojis flottants, envoyé au serveur, puis recyclé.
+            Vous pouvez aussi déposer une nouvelle bulle près du réseau vivant.
           </p>
         </div>
-        <button type="button" className="ghost" onClick={resetView}>
-          Revenir au réseau
-        </button>
+        <div className="hero-actions">
+          <button type="button" className="ghost" onClick={handleAddBubble}>
+            Ajouter une bulle
+          </button>
+          <button type="button" className="ghost" onClick={resetView}>
+            Revenir au réseau
+          </button>
+        </div>
       </header>
 
       <div className="scene" aria-label="Réseau de bulles 3D">
@@ -492,7 +624,10 @@ export default function App() {
             <div>
               <p className="eyebrow">Intérieur</p>
               <h2>{focusedBubble.title}</h2>
-              <p className="lede">Plantez un titre qui flottera dans la bulle.</p>
+              <p className="lede">
+                Semez un texte. Il devient un mini-réseau de tags/émojis flottant, envoyé au serveur lors
+                de chaque synchro. Le texte brut est détruit après transmutation.
+              </p>
             </div>
             <button type="button" className="ghost" onClick={handleExitInterior}>
               Quitter la bulle
@@ -502,23 +637,23 @@ export default function App() {
           <div className="interior-body">
             <div className="interior-viewport" ref={interiorContainerRef} />
             <form className="note-form" onSubmit={handleAddNote}>
-              <label htmlFor="note">Titre à planter</label>
+              <label htmlFor="note">Texte à semer</label>
               <input
                 id="note"
                 type="text"
                 value={newNote}
                 onChange={(e) => setNewNote(e.target.value)}
-                placeholder="Un mot, une phrase, une intention..."
+                placeholder="Un mot, une phrase, une pluie d'émojis..."
               />
               <button type="submit" className="primary">Planter</button>
             </form>
-            <div className="note-list">
-              {(notesByBubble[focusedBubble.id] || []).length === 0 ? (
-                <p className="muted">Aucun texte pour l'instant. Ajoutez le premier.</p>
+            <div className="sync-feed">
+              {syncEvents.length === 0 ? (
+                <p className="muted">Chaque transmutation sera envoyée puis effacée ici.</p>
               ) : (
                 <ul>
-                  {(notesByBubble[focusedBubble.id] || []).map((note) => (
-                    <li key={note.id}>{note.text}</li>
+                  {syncEvents.map((event) => (
+                    <li key={event.id}>{event.message}</li>
                   ))}
                 </ul>
               )}
