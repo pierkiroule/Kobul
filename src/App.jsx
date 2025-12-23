@@ -100,44 +100,81 @@ function createSeededRandom(seedString = '') {
 }
 
 function buildProceduralSky(accentColor, random) {
-  const skyGeo = new THREE.SphereGeometry(20, 64, 64);
-  const topColor = new THREE.Color(accentColor).lerp(new THREE.Color(0x87b8ff), 0.35);
+  const canvas = document.createElement('canvas');
+  canvas.width = 1024;
+  canvas.height = 512;
+  const ctx = canvas.getContext('2d');
+
+  const topColor = new THREE.Color(accentColor).lerp(new THREE.Color(0x91c5ff), 0.3);
   const bottomColor = new THREE.Color(0x050a16);
+  const horizonColor = new THREE.Color(accentColor).lerp(new THREE.Color(0x0b1d2f), 0.6);
 
-  const material = new THREE.ShaderMaterial({
-    side: THREE.BackSide,
-    uniforms: {
-      topColor: { value: topColor },
-      bottomColor: { value: bottomColor },
-      exponent: { value: 0.9 + random() * 0.2 },
-      offset: { value: 0.05 },
-    },
-    vertexShader: `
-      varying vec3 vWorldPosition;
-      void main() {
-        vec4 worldPosition = modelMatrix * vec4(position, 1.0);
-        vWorldPosition = worldPosition.xyz;
-        gl_Position = projectionMatrix * viewMatrix * worldPosition;
-      }
-    `,
-    fragmentShader: `
-      varying vec3 vWorldPosition;
-      uniform vec3 topColor;
-      uniform vec3 bottomColor;
-      uniform float exponent;
-      uniform float offset;
-      void main() {
-        float h = normalize(vWorldPosition + offset).y;
-        float mixAmount = max(pow(max(h, 0.0), exponent), 0.0);
-        gl_FragColor = vec4(mix(bottomColor, topColor, mixAmount), 1.0);
-      }
-    `,
-  });
+  const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
+  gradient.addColorStop(0, topColor.getStyle());
+  gradient.addColorStop(0.55, topColor.clone().lerp(bottomColor, 0.2).getStyle());
+  gradient.addColorStop(1, bottomColor.getStyle());
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
 
+  const horizonHeight = canvas.height * 0.64;
+  ctx.beginPath();
+  ctx.moveTo(0, canvas.height);
+  let lastY = horizonHeight;
+  for (let x = 0; x <= canvas.width; x += 8) {
+    const drift = (random() - 0.5) * 22;
+    const peak = Math.sin(x * 0.004 + random() * 2) * 28;
+    lastY = THREE.MathUtils.clamp(lastY + drift + peak * 0.02, horizonHeight - 42, horizonHeight + 32);
+    ctx.lineTo(x, lastY);
+  }
+  ctx.lineTo(canvas.width, canvas.height);
+  ctx.closePath();
+  ctx.fillStyle = horizonColor.getStyle();
+  ctx.fill();
+
+  const cloudCount = 18 + Math.floor(random() * 10);
+  ctx.globalAlpha = 0.24;
+  ctx.fillStyle = topColor.clone().lerp(new THREE.Color(0xffffff), 0.3).getStyle();
+  for (let i = 0; i < cloudCount; i += 1) {
+    const baseX = random() * canvas.width;
+    const baseY = random() * horizonHeight * 0.9;
+    const width = 80 + random() * 120;
+    const height = 18 + random() * 30;
+    const segments = 6 + Math.floor(random() * 6);
+    for (let j = 0; j < segments; j += 1) {
+      const offsetX = (random() - 0.5) * width * 0.35;
+      const offsetY = (random() - 0.5) * height * 0.35;
+      ctx.beginPath();
+      ctx.ellipse(baseX + offsetX, baseY + offsetY, width * 0.2, height * 0.4, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+  ctx.globalAlpha = 1;
+
+  const starCount = 260 + Math.floor(random() * 140);
+  ctx.fillStyle = '#e8f7ff';
+  for (let i = 0; i < starCount; i += 1) {
+    const x = random() * canvas.width;
+    const y = random() * horizonHeight * 0.85;
+    const size = 0.5 + random() * 1.2;
+    ctx.beginPath();
+    ctx.arc(x, y, size, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.wrapS = THREE.MirroredRepeatWrapping;
+  texture.wrapT = THREE.ClampToEdgeWrapping;
+  texture.needsUpdate = true;
+
+  const skyGeo = new THREE.SphereGeometry(22, 64, 64);
+  const material = new THREE.MeshBasicMaterial({ map: texture, side: THREE.BackSide });
   const mesh = new THREE.Mesh(skyGeo, material);
+
   return {
     mesh,
     dispose: () => {
+      texture.dispose();
       skyGeo.dispose();
       material.dispose();
     },
@@ -1148,7 +1185,7 @@ export default function App() {
                 ))}
               </div>
               <div className="bubble-meta">
-                <span className="chip">Skybox : {focusedBubble.skyboxUrl || 'à venir'}</span>
+                <span className="chip">Skybox : paysage généré</span>
                 <span className="chip">FX : {focusedBubble.fx || 'silence'}</span>
               </div>
               <div className="control-row">
