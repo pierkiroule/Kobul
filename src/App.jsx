@@ -2,6 +2,8 @@ import React, { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import gsap from 'gsap';
+import Map2D from './modes/Map2D';
+import { ensureTags, tokenizeText } from './utils/tags';
 
 const palette = [0x7cf7ff, 0xff7bd9, 0xffd170, 0x7bffbf, 0xb7a7ff];
 
@@ -316,15 +318,6 @@ function buildBubblePattern(accentColor, seed) {
   return texture;
 }
 
-function ensureTags(content, fallbackTitle = '') {
-  const tokens = tokenizeText(content || '');
-  const titleTokens = tokenizeText(fallbackTitle || '');
-  const defaults = ['#bulle', '#réseau', '✨'];
-  if (tokens.length > 0) return tokens;
-  if (titleTokens.length > 0) return titleTokens;
-  return defaults;
-}
-
 function generateBubbles() {
   const count = poeticTitles.length;
   const goldenAngle = Math.PI * (3 - Math.sqrt(5));
@@ -370,20 +363,6 @@ function generateBubbles() {
   return base;
 }
 
-function tokenizeText(input) {
-  const cleaned = input.trim();
-  if (!cleaned) return [];
-
-  const emojiMatches = cleaned.match(/[\p{Emoji}\u2600-\u27BF]/gu) || [];
-  const words = cleaned
-    .replace(/[\p{Emoji}\u2600-\u27BF]/gu, '')
-    .split(/\s+/)
-    .filter(Boolean)
-    .map((word) => `#${word.toLowerCase()}`);
-
-  return [...words, ...emojiMatches];
-}
-
 function uniqueId() {
   return crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
@@ -391,6 +370,7 @@ function uniqueId() {
 export default function App() {
   const sceneContainerRef = useRef(null);
   const interiorContainerRef = useRef(null);
+  const mapHandleRef = useRef(null);
 
   const rendererRef = useRef(null);
   const cameraRef = useRef(null);
@@ -415,10 +395,12 @@ export default function App() {
   const interiorFrameIdRef = useRef(null);
   const interiorFallbackViewRef = useRef({ yaw: 0, pitch: 0, dragging: false, lastX: 0, lastY: 0 });
   const interiorAutoDriftRef = useRef(0);
+  const teardown3DRef = useRef(null);
 
   const focusedBubbleRef = useRef(null);
 
   const [bubbles, setBubbles] = useState(generateBubbles);
+  const [viewMode, setViewMode] = useState('3d');
   const [focusedBubble, setFocusedBubble] = useState(null);
   const [isInteriorOpen, setIsInteriorOpen] = useState(false);
   const [seedInput, setSeedInput] = useState('');
@@ -433,6 +415,17 @@ export default function App() {
     isInteriorOpenRef.current = isInteriorOpen;
   }, [isInteriorOpen]);
 
+  useEffect(() => {
+    if (viewMode === '2d') {
+      pendingEntryRef.current = false;
+      if (isInteriorOpen) setIsInteriorOpen(false);
+      if (teardown3DRef.current) {
+        teardown3DRef.current();
+        teardown3DRef.current = null;
+      }
+    }
+  }, [viewMode]);
+
   const logEvent = (message) => {
     setSyncEvents((prev) => {
       const next = [{ id: uniqueId(), message }, ...prev];
@@ -441,7 +434,7 @@ export default function App() {
   };
 
   const releaseSeeds = (tags) => {
-    if (!seedGroupRef.current || tags.length === 0) return;
+    if (viewMode !== '3d' || !seedGroupRef.current || tags.length === 0) return;
     const uniqueTags = Array.from(new Set(tags));
 
     const cluster = new THREE.Group();
@@ -510,6 +503,14 @@ export default function App() {
   };
 
   const resetView = () => {
+    if (viewMode === '2d') {
+      mapHandleRef.current?.refit?.();
+      setFocusedBubble(null);
+      focusedBubbleRef.current = null;
+      pendingEntryRef.current = false;
+      return;
+    }
+
     if (!cameraRef.current || !controlsRef.current) return;
     gsap.to(cameraRef.current.position, { x: 0, y: 5, z: 22, duration: 1.2, ease: 'power2.inOut' });
     gsap.to(controlsRef.current.target, { x: 0, y: 0, z: 0, duration: 1.2, ease: 'power2.inOut' });
@@ -540,16 +541,18 @@ export default function App() {
     });
   };
 
-  const focusBubble = (mesh) => {
-    if (!mesh) return;
-    const meta = mesh.userData.meta;
+  const focusBubble = (selection) => {
+    if (!selection) return;
+    const meta = selection.userData?.meta || selection;
     setFocusedBubble(meta);
     setIsInteriorOpen(false);
     setSyncEvents([]);
     focusedBubbleRef.current = meta;
-    pendingEntryRef.current = true;
+    pendingEntryRef.current = viewMode === '3d';
 
-    moveCameraToBubbleCenter(meta);
+    if (viewMode === '3d') {
+      moveCameraToBubbleCenter(meta);
+    }
   };
 
   useEffect(() => {
@@ -562,7 +565,7 @@ export default function App() {
   }, [bubbles, focusedBubble]);
 
   useEffect(() => {
-    if (!sceneContainerRef.current) return undefined;
+    if (viewMode !== '3d' || !sceneContainerRef.current) return undefined;
 
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x020610);
@@ -901,7 +904,7 @@ export default function App() {
 
     animate();
 
-    return () => {
+    const cleanup = () => {
       renderer.domElement.removeEventListener('pointerdown', onPointerDown);
       renderer.domElement.removeEventListener('pointerup', onPointerUp);
       renderer.domElement.removeEventListener('pointerleave', onPointerOut);
@@ -953,8 +956,17 @@ export default function App() {
       }
       cameraRef.current = null;
       controlsRef.current = null;
+      atomsRef.current = [];
+      rendererRef.current = null;
     };
-  }, [bubbles]);
+
+    teardown3DRef.current = cleanup;
+
+    return () => {
+      teardown3DRef.current = null;
+      cleanup();
+    };
+  }, [bubbles, viewMode]);
 
   useEffect(() => {
     if (!isInteriorOpen || !interiorContainerRef.current || !focusedBubble) return undefined;
@@ -1234,14 +1246,41 @@ export default function App() {
   const tagPreview = (focusedBubble?.seedTags || ensureTags(focusedBubble?.note, focusedBubble?.title)) || [];
   const previewTags = tagPreview.slice(0, 3);
   const remainingTagCount = Math.max(tagPreview.length - previewTags.length, 0);
+  const is3DView = viewMode === '3d';
+  const viewToggleLabel = is3DView ? 'Basculer en carte 2D' : 'Revenir en constellation 3D';
+  const viewLabel = is3DView ? 'Espace 3D' : 'Carte 2D tactile';
+
+  const handleToggleViewMode = () => {
+    setViewMode((prev) => {
+      const next = prev === '3d' ? '2d' : '3d';
+      if (next === '2d') {
+        pendingEntryRef.current = false;
+        setIsInteriorOpen(false);
+      }
+      return next;
+    });
+  };
 
   return (
-    <div className="shell">
-      <aside className="sidebar">
+    <div className="page">
+      <header className="topbar">
+        <div className="topbar-copy">
+          <p className="eyebrow">EchoBulle</p>
+          <h2>{is3DView ? 'Immersion réseau 3D' : 'Carte plane pour le réseau'}</h2>
+          <p className="muted">Basculer entre la constellation spatiale et la lecture cartographique, toujours en douceur.</p>
+        </div>
+        <div className="topbar-actions">
+          <span className="chip subtle">{viewLabel}</span>
+          <button type="button" className="primary" onClick={handleToggleViewMode}>{viewToggleLabel}</button>
+        </div>
+      </header>
+
+      <div className="shell">
+        <aside className="sidebar">
         <div className="sidebar-block">
           <p className="eyebrow">EchoBulle</p>
-          <h1>Réseau 3D unique et intérieur</h1>
-          <p className="lede">Un terrain paisible pour déposer des mots, sentir leur résonance et entrer dans un panorama dédié.</p>
+          <h1>Réseau 3D & carte 2D</h1>
+          <p className="lede">Un terrain paisible pour déposer des mots, sentir leur résonance et entrer dans un panorama dédié. En 2D, naviguez comme sur une carte tactile.</p>
           <ul className="mini-steps">
             <li>Choisir une bulle et s&apos;en approcher.</li>
             <li>Lâcher des tags, les regarder dériver.</li>
@@ -1315,13 +1354,24 @@ export default function App() {
             <div className="panel-header">
               <div>
                 <p className="eyebrow">Réseau</p>
-                <h3>Constellation vivante</h3>
+                <h3>{is3DView ? 'Constellation vivante' : 'Carte plane du réseau'}</h3>
               </div>
               <div className="panel-actions">
+                <span className="chip subtle">{viewLabel}</span>
                 <button type="button" className="ghost" onClick={resetView}>Recentrer</button>
               </div>
             </div>
-            <div ref={sceneContainerRef} className="experience" />
+            {is3DView ? (
+              <div ref={sceneContainerRef} className="experience" />
+            ) : (
+              <Map2D
+                ref={mapHandleRef}
+                bubbles={bubbles}
+                focusedBubble={focusedBubble}
+                isActive={!is3DView}
+                onFocusBubble={focusBubble}
+              />
+            )}
           </section>
 
           <section className="scene-panel interior-panel" aria-label="Intérieur de la bulle">
@@ -1354,5 +1404,6 @@ export default function App() {
         </div>
       </main>
     </div>
+  </div>
   );
 }
