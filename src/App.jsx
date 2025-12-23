@@ -86,6 +86,129 @@ function createTextSprite(text, color = '#e8f7ff') {
   return sprite;
 }
 
+function createSeededRandom(seedString = '') {
+  let seed = 0;
+  for (let i = 0; i < seedString.length; i += 1) {
+    seed = (seed * 31 + seedString.charCodeAt(i)) >>> 0;
+  }
+  return () => {
+    seed ^= seed << 13;
+    seed ^= seed >> 17;
+    seed ^= seed << 5;
+    return (seed >>> 0) / 4294967296;
+  };
+}
+
+function buildProceduralSky(accentColor, random) {
+  const skyGeo = new THREE.SphereGeometry(20, 64, 64);
+  const topColor = new THREE.Color(accentColor).lerp(new THREE.Color(0x87b8ff), 0.35);
+  const bottomColor = new THREE.Color(0x050a16);
+
+  const material = new THREE.ShaderMaterial({
+    side: THREE.BackSide,
+    uniforms: {
+      topColor: { value: topColor },
+      bottomColor: { value: bottomColor },
+      exponent: { value: 0.9 + random() * 0.2 },
+      offset: { value: 0.05 },
+    },
+    vertexShader: `
+      varying vec3 vWorldPosition;
+      void main() {
+        vec4 worldPosition = modelMatrix * vec4(position, 1.0);
+        vWorldPosition = worldPosition.xyz;
+        gl_Position = projectionMatrix * viewMatrix * worldPosition;
+      }
+    `,
+    fragmentShader: `
+      varying vec3 vWorldPosition;
+      uniform vec3 topColor;
+      uniform vec3 bottomColor;
+      uniform float exponent;
+      uniform float offset;
+      void main() {
+        float h = normalize(vWorldPosition + offset).y;
+        float mixAmount = max(pow(max(h, 0.0), exponent), 0.0);
+        gl_FragColor = vec4(mix(bottomColor, topColor, mixAmount), 1.0);
+      }
+    `,
+  });
+
+  const mesh = new THREE.Mesh(skyGeo, material);
+  return {
+    mesh,
+    dispose: () => {
+      skyGeo.dispose();
+      material.dispose();
+    },
+  };
+}
+
+function buildLandscape(accentColor, random) {
+  const group = new THREE.Group();
+  const terrainGeometry = new THREE.PlaneGeometry(26, 26, 70, 70);
+  const position = terrainGeometry.attributes.position;
+  for (let i = 0; i < position.count; i += 1) {
+    const x = position.getX(i);
+    const y = position.getY(i);
+    const hills = Math.sin(x * 0.35) * 0.35 + Math.cos(y * 0.28) * 0.25;
+    const ripples = Math.sin((x + y) * 0.7) * 0.12;
+    const noise = (random() - 0.5) * 0.28;
+    position.setZ(i, hills + ripples + noise);
+  }
+  position.needsUpdate = true;
+  terrainGeometry.computeVertexNormals();
+
+  const terrainMaterial = new THREE.MeshStandardMaterial({
+    color: new THREE.Color(0x0d1f33).lerp(new THREE.Color(accentColor), 0.18),
+    roughness: 0.82,
+    metalness: 0.08,
+  });
+  const terrain = new THREE.Mesh(terrainGeometry, terrainMaterial);
+  terrain.rotation.x = -Math.PI / 2;
+  terrain.receiveShadow = true;
+  group.add(terrain);
+
+  const scatterGroup = new THREE.Group();
+  const scatterCount = 8 + Math.floor(random() * 8);
+  for (let i = 0; i < scatterCount; i += 1) {
+    const typeRoll = random();
+    const size = 0.3 + random() * 0.9;
+    let geometry = null;
+    if (typeRoll < 0.33) geometry = new THREE.TorusKnotGeometry(size * 0.5, size * 0.16, 64, 12);
+    else if (typeRoll < 0.66) geometry = new THREE.DodecahedronGeometry(size);
+    else geometry = new THREE.CylinderGeometry(size * 0.6, size * 0.6, size * 1.6, 16, 1);
+
+    const hueShift = 0.04 + random() * 0.12;
+    const shapeMaterial = new THREE.MeshStandardMaterial({
+      color: new THREE.Color(accentColor).offsetHSL(hueShift, -0.1, 0.08),
+      emissive: new THREE.Color(accentColor).multiplyScalar(0.25),
+      roughness: 0.4,
+      metalness: 0.2,
+    });
+
+    const mesh = new THREE.Mesh(geometry, shapeMaterial);
+    mesh.position.set((random() - 0.5) * 18, size * 0.8 + 0.1, (random() - 0.5) * 18);
+    mesh.rotation.set(random() * Math.PI, random() * Math.PI, random() * Math.PI);
+    scatterGroup.add(mesh);
+  }
+
+  group.add(scatterGroup);
+  return {
+    group,
+    scatterGroup,
+    terrain,
+    dispose: () => {
+      terrainGeometry.dispose();
+      terrainMaterial.dispose();
+      scatterGroup.children.forEach((mesh) => {
+        if (mesh.geometry) mesh.geometry.dispose();
+        if (mesh.material) mesh.material.dispose();
+      });
+    },
+  };
+}
+
 function ensureTags(content, fallbackTitle = '') {
   const tokens = tokenizeText(content || '');
   const titleTokens = tokenizeText(fallbackTitle || '');
@@ -173,6 +296,8 @@ export default function App() {
   const settledSeedsRef = useRef([]);
   const bubbleTagGroupsRef = useRef(new Map());
   const restoreControlsRef = useRef(null);
+  const isInteriorOpenRef = useRef(false);
+  const pendingEntryRef = useRef(false);
 
   const interiorRendererRef = useRef(null);
   const interiorSceneRef = useRef(null);
@@ -196,6 +321,10 @@ export default function App() {
   useEffect(() => {
     focusedBubbleRef.current = focusedBubble;
   }, [focusedBubble]);
+
+  useEffect(() => {
+    isInteriorOpenRef.current = isInteriorOpen;
+  }, [isInteriorOpen]);
 
   const logEvent = (message) => {
     setSyncEvents((prev) => {
@@ -279,15 +408,17 @@ export default function App() {
     gsap.to(controlsRef.current.target, { x: 0, y: 0, z: 0, duration: 1.2, ease: 'power2.inOut' });
     setFocusedBubble(null);
     focusedBubbleRef.current = null;
+    pendingEntryRef.current = false;
   };
 
   const focusBubble = (mesh) => {
     if (!mesh || !cameraRef.current || !controlsRef.current) return;
     const meta = mesh.userData.meta;
     setFocusedBubble(meta);
-    setIsInteriorOpen(true);
+    setIsInteriorOpen(false);
     setSyncEvents([]);
     focusedBubbleRef.current = meta;
+    pendingEntryRef.current = true;
 
     gsap.to(cameraRef.current.position, {
       x: mesh.position.x + 0.6,
@@ -309,6 +440,8 @@ export default function App() {
     if (focusedBubble && !bubbles.some((bubble) => bubble.id === focusedBubble.id)) {
       setFocusedBubble(null);
       focusedBubbleRef.current = null;
+      pendingEntryRef.current = false;
+      setIsInteriorOpen(false);
     }
   }, [bubbles, focusedBubble]);
 
@@ -494,6 +627,18 @@ export default function App() {
         halo.visible = false;
       }
 
+      if (pendingEntryRef.current && targetBubble && !isInteriorOpenRef.current) {
+        const target = atoms.find((mesh) => mesh.userData.meta.id === targetBubble.id);
+        if (target) {
+          const distance = camera.position.distanceTo(target.position);
+          if (distance <= 1.08) {
+            pendingEntryRef.current = false;
+            setIsInteriorOpen(true);
+            logEvent(`${targetBubble.title} ouverte : immersion 360° enclenchée.`);
+          }
+        }
+      }
+
       const pendingIntegrations = [];
       seedClustersRef.current.forEach((cluster) => {
         let nearest = null;
@@ -563,11 +708,11 @@ export default function App() {
 
         cluster.nodes.forEach((sprite) => {
           const wobble = sprite.userData.wobble;
-      sprite.position.x = sprite.userData.offset.x + Math.sin(elapsed * 0.7 + wobble) * 0.06;
-      sprite.position.y = sprite.userData.offset.y + Math.cos(elapsed * 0.6 + wobble * 1.3) * 0.06;
-      sprite.position.z = sprite.userData.offset.z + Math.sin(elapsed * 0.5 + wobble * 0.7) * 0.06;
-      sprite.lookAt(camera.position);
-    });
+          sprite.position.x = sprite.userData.offset.x + Math.sin(elapsed * 0.7 + wobble) * 0.06;
+          sprite.position.y = sprite.userData.offset.y + Math.cos(elapsed * 0.6 + wobble * 1.3) * 0.06;
+          sprite.position.z = sprite.userData.offset.z + Math.sin(elapsed * 0.5 + wobble * 0.7) * 0.06;
+          sprite.lookAt(camera.position);
+        });
       });
 
       if (pendingIntegrations.length > 0 && seedGroupRef.current) {
@@ -727,35 +872,12 @@ export default function App() {
     soft.position.set(2, 2, 2);
     scene.add(soft);
 
-    const domeMaterial = new THREE.MeshStandardMaterial({
-      color: new THREE.Color(0x0b1a33),
-      emissive: new THREE.Color(focusedBubble.color).multiplyScalar(0.15),
-      roughness: 0.85,
-      metalness: 0.05,
-      side: THREE.BackSide,
-    });
-    let domeTexture = null;
-    if (focusedBubble.skyboxUrl) {
-      const loader = new THREE.TextureLoader();
-      loader.load(
-        focusedBubble.skyboxUrl,
-        (texture) => {
-          texture.colorSpace = THREE.SRGBColorSpace;
-          texture.wrapS = THREE.RepeatWrapping;
-          texture.wrapT = THREE.RepeatWrapping;
-          domeMaterial.map = texture;
-          domeMaterial.needsUpdate = true;
-          domeTexture = texture;
-        },
-        undefined,
-        () => {
-          domeMaterial.color = new THREE.Color(0x0b1a33);
-        },
-      );
-    }
+    const random = createSeededRandom(`${focusedBubble.id}-${focusedBubble.createdAt}`);
+    const sky = buildProceduralSky(focusedBubble.color, random);
+    scene.add(sky.mesh);
 
-    const dome = new THREE.Mesh(new THREE.SphereGeometry(16, 64, 64), domeMaterial);
-    scene.add(dome);
+    const landscape = buildLandscape(focusedBubble.color, random);
+    scene.add(landscape.group);
 
     const networkGroup = new THREE.Group();
     scene.add(networkGroup);
@@ -867,7 +989,12 @@ export default function App() {
         const { yaw, pitch } = interiorFallbackViewRef.current;
         camera.rotation.set(pitch, yaw + interiorAutoDriftRef.current, 0, 'YXZ');
       }
-      dome.rotation.y += 0.0009;
+      sky.mesh.rotation.y += 0.0006;
+      landscape.scatterGroup.rotation.y += 0.0004;
+      landscape.scatterGroup.children.forEach((shape, idx) => {
+        shape.rotation.x += 0.001 + idx * 0.0002;
+        shape.rotation.y += 0.0015;
+      });
       renderer.render(scene, camera);
       interiorFrameIdRef.current = requestAnimationFrame(animate);
     };
@@ -891,9 +1018,8 @@ export default function App() {
         });
       });
       miniNetworksRef.current = [];
-      if (domeTexture) domeTexture.dispose();
-      dome.geometry.dispose();
-      dome.material.dispose();
+      landscape.dispose();
+      sky.dispose();
       renderer.dispose();
       if (interiorContainerRef.current?.contains(renderer.domElement)) {
         interiorContainerRef.current.removeChild(renderer.domElement);
@@ -969,8 +1095,9 @@ export default function App() {
           <p className="eyebrow">EchoBulle</p>
           <h1>Réseau 3D unique et intérieur</h1>
           <p className="lede">
-            Cliquez une bulle, entrez directement dedans et observez son monde de particules. Le réseau reste
-            présent en toile de fond tandis que les tags et émojis gravitent pour rejoindre les bulles.
+            Sélectionnez une bulle, approchez-la : dès que la caméra touche sa surface, l'immersion 360° s'ouvre sur
+            un paysage génératif propre. Le réseau reste présent en toile de fond tandis que les tags et émojis
+            gravitent pour rejoindre les bulles.
           </p>
           <div className="control-row">
             <button type="button" className="primary" onClick={resetView}>Revenir au réseau</button>
